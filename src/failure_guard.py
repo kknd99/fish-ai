@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 import time
 from dataclasses import dataclass
@@ -88,6 +89,8 @@ def _cookie_changed(
 
 
 class _FileLock:
+    """基于 flock 的互斥锁（Windows 上 fcntl 不可用时静默降级为无锁）。"""
+
     def __init__(self, fh):
         self._fh = fh
 
@@ -108,6 +111,23 @@ class _FileLock:
         except Exception:
             pass
         return False
+
+
+@contextmanager
+def _locked_sidecar(target_path: str):
+    """在 target_path 的**旁路文件**（``<path>.lock``）上取互斥锁。
+
+    为什么必须锁旁路文件：状态文件是用 ``os.replace`` 原子替换写入的，锁如果加在
+    状态文件本身的句柄上，替换之后锁就留在了**已被解除链接的旧 inode** 上；第二个
+    进程打开的是新 inode、能立刻拿到锁 —— 于是"读取-修改-写入"并不互斥，并发时
+    会丢更新（熔断计数少算，结果是继续去撞已经触发风控的账号，恰恰是守卫要防的）。
+    旁路文件从不被替换，锁才真正有效。
+    """
+    _ensure_parent_dir(target_path)
+    lock_path = f"{target_path}.lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock_handle:
+        with _FileLock(lock_handle):
+            yield
 
 
 def _ensure_parent_dir(path: str) -> None:
@@ -187,19 +207,17 @@ class FailureGuard:
         _atomic_write_json(self.path, data)
 
     def _update_task(self, task_key: str, updater) -> dict:
-        _ensure_parent_dir(self.path)
-        with open(self.path, "a+", encoding="utf-8") as fh:
-            with _FileLock(fh):
-                fh.seek(0)
-                data = self._load()
-                tasks = data.setdefault("tasks", {})
-                entry = tasks.get(task_key) or {}
-                if not isinstance(entry, dict):
-                    entry = {}
-                entry = updater(entry) or entry
-                tasks[task_key] = entry
-                self._save(data)
-                return entry
+        # 读-改-写必须整体持锁，且锁在旁路文件上（见 _locked_sidecar 的说明）
+        with _locked_sidecar(self.path):
+            data = self._load()
+            tasks = data.setdefault("tasks", {})
+            entry = tasks.get(task_key) or {}
+            if not isinstance(entry, dict):
+                entry = {}
+            entry = updater(entry) or entry
+            tasks[task_key] = entry
+            self._save(data)
+            return entry
 
     def record_success(self, task_key: str, *, now: Optional[datetime] = None) -> None:
         def _reset(_: dict) -> dict:
@@ -227,6 +245,9 @@ class FailureGuard:
         current = _now(self.tz_name, now=now)
         today = _today_str(self.tz_name, now=current)
 
+        # 这里**不加锁**：状态文件是 os.replace 原子替换的，单次读取不会读到半截内容；
+        # 而本方法内部会调用 _update_task（它要拿同一把 flock），若在此处先持锁会自锁
+        # （flock 对不同的打开描述符互斥，同进程也会阻塞）。
         data = self._load()
         entry = (data.get("tasks") or {}).get(task_key) or {}
         if not isinstance(entry, dict):
