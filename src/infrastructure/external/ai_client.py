@@ -12,6 +12,10 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from src.ai_message_builder import build_analysis_messages
 from src.infrastructure.config.settings import AISettings
+from src.infrastructure.external.ai_client_factory import (
+    build_async_openai_client,
+    sanitize_no_proxy_env as _sanitize_no_proxy_env,
+)
 from src.infrastructure.config.env_manager import env_manager
 from src.services.ai_request_compat import (
     CHAT_COMPLETIONS_API_MODE,
@@ -33,38 +37,6 @@ from src.services.ai_response_parser import (
 from src.core.redact import redact_url
 
 
-def _sanitize_no_proxy_env() -> None:
-    """Strip CIDR prefix lengths from IPv6 entries in NO_PROXY / no_proxy.
-
-    httpx <= 0.28.1 wraps NO_PROXY IPv6 entries in brackets *including* the
-    CIDR mask (e.g. ``[::1/128]``), which the URL parser rejects as an invalid
-    port.  Stripping the ``/prefix`` part is safe because httpx doesn't
-    support CIDR range matching anyway — it only does exact-host comparison.
-
-    See https://github.com/encode/httpx/pull/3741
-    """
-    for key in ("NO_PROXY", "no_proxy"):
-        value = os.environ.get(key)
-        if not value:
-            continue
-        parts = [h.strip() for h in value.split(",")]
-        cleaned: list[str] = []
-        changed = False
-        for part in parts:
-            if "/" in part:
-                host, _, prefix = part.partition("/")
-                try:
-                    ipaddress.IPv6Address(host)
-                    cleaned.append(host)
-                    changed = True
-                    continue
-                except ValueError:
-                    pass
-            cleaned.append(part)
-        if changed:
-            os.environ[key] = ",".join(cleaned)
-
-
 class AIClient:
     """AI 客户端封装"""
 
@@ -82,27 +54,21 @@ class AIClient:
         self.client = self._initialize_client()
 
     def _initialize_client(self) -> Optional[AsyncOpenAI]:
-        """初始化 OpenAI 客户端"""
+        """初始化 OpenAI 客户端。
+
+        与抓取侧的 ``src/config.py`` 共用 ai_client_factory，两条路径的代理处理与
+        NO_PROXY 修补不再各写一份（历史上正是因为各写一份，NO_PROXY 的修复只落在
+        这一侧，抓取侧的 AI 分析在同样配置下会全挂）。
+        """
         if not self.settings or not self.settings.is_configured():
             print("警告：AI 配置不完整，AI 功能将不可用")
             return None
 
-        try:
-            if self.settings.proxy_url:
-                # 同 config.py：认证代理的凭据不能落到日志里
-                print(f"正在为 AI 请求使用代理: {redact_url(self.settings.proxy_url)}")
-                os.environ['HTTP_PROXY'] = self.settings.proxy_url
-                os.environ['HTTPS_PROXY'] = self.settings.proxy_url
-
-            _sanitize_no_proxy_env()
-
-            return AsyncOpenAI(
-                api_key=self.settings.api_key,
-                base_url=self.settings.base_url
-            )
-        except Exception as e:
-            print(f"初始化 AI 客户端失败: {e}")
-            return None
+        return build_async_openai_client(
+            api_key=self.settings.api_key,
+            base_url=self.settings.base_url,
+            proxy_url=self.settings.proxy_url,
+        )
 
     def is_available(self) -> bool:
         """检查 AI 客户端是否可用"""

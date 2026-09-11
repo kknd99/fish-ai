@@ -2,9 +2,8 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 
-from src.core.redact import redact_url
+from src.infrastructure.external.ai_client_factory import build_async_openai_client
 
 # --- AI & Notification Configuration ---
 load_dotenv()
@@ -59,24 +58,13 @@ IMAGE_DOWNLOAD_HEADERS = {
 }
 
 # --- Client Initialization ---
-# 检查配置是否齐全
-if not all([BASE_URL, MODEL_NAME]):
-    print("警告：未在 .env 文件中完整设置 OPENAI_BASE_URL 和 OPENAI_MODEL_NAME。AI相关功能可能无法使用。")
-    client = None
-else:
-    try:
-        if PROXY_URL:
-            # 认证代理形如 http://user:pass@host，原文打印等于把凭据写进日志
-            print(f"正在为AI请求使用HTTP/S代理: {redact_url(PROXY_URL)}")
-            # httpx 会自动从环境变量中读取代理设置
-            os.environ['HTTP_PROXY'] = PROXY_URL
-            os.environ['HTTPS_PROXY'] = PROXY_URL
-
-        # openai 客户端内部的 httpx 会自动从环境变量中获取代理配置
-        client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
-    except Exception as e:
-        print(f"初始化 OpenAI 客户端时出错: {e}")
-        client = None
+# 客户端构造与代理环境准备收敛在 ai_client_factory：两条 AI 路径共用同一份逻辑，
+# 避免"修好了一条、另一条还带着同一个 bug"（NO_PROXY 的 IPv6 CIDR 崩溃就是这样漏的）。
+client = build_async_openai_client(
+    api_key=API_KEY,
+    base_url=BASE_URL if all([BASE_URL, MODEL_NAME]) else None,
+    proxy_url=PROXY_URL,
+)
 
 # 检查AI客户端是否成功初始化
 if not client:
