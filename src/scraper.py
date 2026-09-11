@@ -4,7 +4,6 @@ import os
 import random
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urlencode
 
 from playwright.async_api import (
     Response,
@@ -20,7 +19,6 @@ from src.ai_handler import (
 )
 from src.config import (
     AI_DEBUG_MODE,
-    DETAIL_API_URL_PATTERN,
     LOGIN_IS_EDGE,
     RUN_HEADLESS,
     RUNNING_IN_DOCKER,
@@ -45,6 +43,11 @@ from src.utils import (
 from src.core.safe_paths import UnsafePathError, safe_account_state_path
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.services.decision import normalize_decision_mode
+from src.services.site_adapter import (
+    detail_response_predicate,
+    get_site_adapter,
+    search_response_predicate,
+)
 from src.services.rotation_policy import (
     blacklist_disabled_warning,
     can_rotate_account,
@@ -71,7 +74,6 @@ from src.services.seller_profile_cache import (
 from src.services.seller_profile_cache import SellerProfileCache
 from src.services.search_pagination import (
     advance_search_page,
-    is_search_results_response,
 )
 
 
@@ -88,10 +90,8 @@ EDGE_DOCKER_WARNING_PRINTED = False
 
 
 def _is_login_url(url: str) -> bool:
-    if not url:
-        return False
-    lowered = url.lower()
-    return "passport.goofish.com" in lowered or "mini_login" in lowered
+    """登录态失效判定（站点事实来自适配器）。"""
+    return get_site_adapter().is_login_url(url)
 
 
 def _resolve_browser_channel() -> str:
@@ -432,7 +432,7 @@ async def scrape_user_profile(context, user_id: str) -> dict:
     try:
         # --- 任务1: 导航并采集头部信息 ---
         await page.goto(
-            f"https://www.goofish.com/personal?userId={user_id}",
+            get_site_adapter().seller_profile_url(user_id),
             wait_until="domcontentloaded",
             timeout=20000,
         )
@@ -700,7 +700,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 # 步骤 0 - 模拟真实用户：先访问首页（重要的反检测措施）
                 log_time("步骤 0 - 模拟真实用户访问首页...")
                 await page.goto(
-                    "https://www.goofish.com/",
+                    get_site_adapter().home_url(),
                     wait_until="domcontentloaded",
                     timeout=30000,
                 )
@@ -713,13 +713,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
 
                 log_time("步骤 1 - 导航到搜索结果页...")
                 # 使用 'q' 参数构建正确的搜索URL，并进行URL编码
-                params = {"q": keyword}
-                search_url = f"https://www.goofish.com/search?{urlencode(params)}"
+                search_url = get_site_adapter().search_url(keyword)
                 log_time(f"目标URL: {search_url}")
 
                 # 先监听搜索接口响应，再执行导航，避免错过首次请求
                 async with page.expect_response(
-                    is_search_results_response, timeout=30000
+                    search_response_predicate(), timeout=30000
                 ) as initial_response_info:
                     await page.goto(
                         search_url, wait_until="domcontentloaded", timeout=60000
@@ -747,8 +746,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 await random_sleep(1, 3)
 
                 # --- 新增：检查是否存在验证弹窗 ---
-                baxia_dialog = page.locator("div.baxia-dialog-mask")
-                middleware_widget = page.locator("div.J_MIDDLEWARE_FRAME_WIDGET")
+                adapter = get_site_adapter()
+                baxia_dialog = page.locator(adapter.dialog_risk_selector())
+                middleware_widget = page.locator(adapter.middleware_risk_selector())
                 try:
                     # 等待弹窗在2秒内出现。如果出现，则执行块内代码。
                     await baxia_dialog.wait_for(state="visible", timeout=2000)
@@ -808,7 +808,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         await page.click("text=新发布")
                         await random_sleep(1, 2)  # 原来是 (1.5, 2.5)
                         async with page.expect_response(
-                            is_search_results_response, timeout=20000
+                            search_response_predicate(), timeout=20000
                         ) as response_info:
                             await page.click(f"text={new_publish_option}")
                             # --- 修改: 增加排序后的等待时间 ---
@@ -823,7 +823,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
 
                 if personal_only:
                     async with page.expect_response(
-                        is_search_results_response, timeout=20000
+                        search_response_predicate(), timeout=20000
                     ) as response_info:
                         await page.click("text=个人闲置")
                         # --- 修改: 将固定等待改为随机等待，并加长 ---
@@ -833,7 +833,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 if free_shipping:
                     try:
                         async with page.expect_response(
-                            is_search_results_response, timeout=20000
+                            search_response_predicate(), timeout=20000
                         ) as response_info:
                             await page.click("text=包邮")
                             await random_sleep(2, 4)
@@ -925,7 +925,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                             if await search_btn.count():
                                 try:
                                     async with page.expect_response(
-                                        is_search_results_response,
+                                        search_response_predicate(),
                                         timeout=20000,
                                     ) as response_info:
                                         await search_btn.click()
@@ -965,7 +965,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                             await random_sleep(1, 2.5)  # 原来是 asyncio.sleep(5)
 
                         async with page.expect_response(
-                            is_search_results_response, timeout=20000
+                            search_response_predicate(), timeout=20000
                         ) as response_info:
                             await page.keyboard.press("Tab")
                             # --- 修改: 增加确认价格后的等待时间 ---
@@ -1040,7 +1040,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         detail_page = await context.new_page()
                         try:
                             async with detail_page.expect_response(
-                                lambda r: DETAIL_API_URL_PATTERN in r.url, timeout=25000
+                                detail_response_predicate(), timeout=25000
                             ) as detail_info:
                                 await detail_page.goto(
                                     item_data["商品链接"],
@@ -1220,7 +1220,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 if type(e).__name__ == "TargetClosedError":
                     log_time("浏览器已关闭，忽略后续异常（可能是任务被停止）。")
                     return processed_item_count
-                if "passport.goofish.com" in str(e):
+                if get_site_adapter().is_login_url(str(e)):
                     raise LoginRequiredError(
                         f"Login required: redirected to passport flow ({e})"
                     ) from e
