@@ -9,7 +9,10 @@ import json
 from datetime import datetime
 
 from src.infrastructure.persistence.sqlite_bootstrap import bootstrap_sqlite_storage
-from src.infrastructure.persistence.sqlite_connection import sqlite_connection
+from src.infrastructure.persistence.sqlite_connection import (
+    run_with_lock_retry,
+    sqlite_connection,
+)
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.price_history_service import parse_price_value
 from src.services.result_blacklist_service import (
@@ -163,35 +166,40 @@ def _save_result_record_sync(record: dict, keyword: str) -> bool:
     except (TypeError, ValueError):
         keyword_hit_count = 0
 
-    with sqlite_connection() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO result_items (
-                result_filename, keyword, task_name, crawl_time, publish_time, price,
-                price_display, item_id, title, link, link_unique_key, seller_nickname,
-                is_recommended, analysis_source, keyword_hit_count, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                build_result_filename(keyword),
-                record.get("搜索关键字", keyword),
-                record.get("任务名称", ""),
-                record.get("爬取时间", ""),
-                item.get("发布时间"),
-                parse_price_value(item.get("当前售价")),
-                item.get("当前售价"),
-                item.get("商品ID"),
-                item.get("商品标题"),
-                link,
-                link_unique_key,
-                (record.get("卖家信息", {}) or {}).get("卖家昵称") or item.get("卖家昵称"),
-                1 if analysis.get("is_recommended") else 0,
-                analysis.get("analysis_source"),
-                keyword_hit_count,
-                json.dumps(record, ensure_ascii=False),
-            ),
-        )
-        conn.commit()
+    def _write() -> None:
+        with sqlite_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO result_items (
+                    result_filename, keyword, task_name, crawl_time, publish_time, price,
+                    price_display, item_id, title, link, link_unique_key, seller_nickname,
+                    is_recommended, analysis_source, keyword_hit_count, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    build_result_filename(keyword),
+                    record.get("搜索关键字", keyword),
+                    record.get("任务名称", ""),
+                    record.get("爬取时间", ""),
+                    item.get("发布时间"),
+                    parse_price_value(item.get("当前售价")),
+                    item.get("当前售价"),
+                    item.get("商品ID"),
+                    item.get("商品标题"),
+                    link,
+                    link_unique_key,
+                    (record.get("卖家信息", {}) or {}).get("卖家昵称") or item.get("卖家昵称"),
+                    1 if analysis.get("is_recommended") else 0,
+                    analysis.get("analysis_source"),
+                    keyword_hit_count,
+                    json.dumps(record, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+
+    # 多个爬虫子进程与 Web 进程会同时写这个库：遇到 "database is locked" 时
+    # 有限重试，而不是像历史实现那样在入库路径上静默吞掉（丢结果）。
+    run_with_lock_retry(_write)
     return True
 
 

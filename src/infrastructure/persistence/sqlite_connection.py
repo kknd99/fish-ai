@@ -5,14 +5,56 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from src.infrastructure.persistence.storage_names import DEFAULT_DATABASE_PATH
 
 
 BUSY_TIMEOUT_MS = 5000
+
+#: 写操作遇到 "database is locked" 时的重试次数与退避基数。
+#: 为什么需要：多个爬虫子进程 + Web 进程会同时写同一个库，WAL 下写是串行的，
+#: 超过 busy_timeout 仍拿不到锁就抛 OperationalError。历史实现把这条异常在入库
+#: 路径上吞成了 False（"静默丢结果"）——现在有限重试，仍失败则明确报错。
+WRITE_RETRY_ATTEMPTS = 4
+WRITE_RETRY_BASE_DELAY = 0.2
+
+
+def is_database_locked_error(exc: BaseException) -> bool:
+    """判断异常是否是"库被占用"（可重试），而不是别的数据库错误。"""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
+def run_with_lock_retry(
+    operation,
+    *,
+    attempts: int = WRITE_RETRY_ATTEMPTS,
+    base_delay: float = WRITE_RETRY_BASE_DELAY,
+):
+    """执行写操作，遇到"库被占用"时按线性退避重试。
+
+    非锁相关异常立即抛出（重试它们没有意义）。重试次数用尽后抛出最后一次异常，
+    由调用方决定如何提示——关键是不能静默吞掉。
+    """
+    total = max(1, int(attempts))
+    last_error: Optional[BaseException] = None
+    for attempt in range(total):
+        try:
+            return operation()
+        except Exception as exc:  # noqa: BLE001 - 需要分类后决定是否重试
+            if not is_database_locked_error(exc):
+                raise
+            last_error = exc
+            if attempt < total - 1:
+                time.sleep(base_delay * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 SCHEMA_STATEMENTS = (
     """

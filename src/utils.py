@@ -129,7 +129,9 @@ async def save_to_jsonl(data_record: dict, keyword: str):
     try:
         return await save_result_record(data_record, keyword)
     except Exception as e:
-        print(f"写入 SQLite 结果记录出错: {e}")
+        # 注意：去重集合只存在于本次运行内，未入库的商品下次运行会重新处理；
+        # 但这条信息必须打出来——历史上它被静默吞掉过（表现为"结果莫名少了"）。
+        print(f"写入 SQLite 结果记录出错（该条未入库，下次运行会重试）: {e}")
         return False
 
 
