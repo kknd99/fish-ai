@@ -9,6 +9,7 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.core.cron_utils import validate_cron_expression
+from src.core.safe_paths import validate_task_name
 from src.services.account_strategy_service import (
     clean_account_state_file,
     normalize_account_strategy,
@@ -160,6 +161,13 @@ class TaskCreate(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    @field_validator("task_name", mode="before")
+    @classmethod
+    def check_task_name(cls, value):
+        """任务名会进入文件系统路径（``images/task_images_<name>``），
+        必须在输入边界拦住穿越型名字，否则可导致任意目录删除/写入。"""
+        return validate_task_name(value)
+
     task_name: str
     enabled: bool = True
     keyword: str
@@ -226,6 +234,14 @@ class TaskUpdate(BaseModel):
     """更新任务的DTO"""
 
     model_config = ConfigDict(extra="ignore")
+
+    @field_validator("task_name", mode="before")
+    @classmethod
+    def check_task_name(cls, value):
+        """同 TaskCreate：任务名进入文件系统路径前必须校验。"""
+        if value is None:
+            return None
+        return validate_task_name(value)
 
     task_name: Optional[str] = None
     enabled: Optional[bool] = None

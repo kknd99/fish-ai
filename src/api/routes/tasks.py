@@ -12,11 +12,13 @@ from src.api.dependencies import (
     get_task_generation_service,
     get_task_service,
 )
+from src.core.safe_paths import UnsafePathError
 from src.services.task_service import TaskService
 from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_generation_runner import (
+    build_criteria_filename,
     build_task_create,
     run_ai_generation_job,
 )
@@ -177,11 +179,10 @@ async def update_task(
                 )
                 if not str(description_for_ai or "").strip():
                     raise HTTPException(status_code=400, detail="AI 模式下详细需求不能为空。")
-                safe_keyword = "".join(
-                    c for c in existing_task.keyword.lower().replace(' ', '_')
-                    if c.isalnum() or c in "_-"
-                ).rstrip()
-                output_filename = f"prompts/{safe_keyword}_criteria.txt"
+                try:
+                    output_filename = build_criteria_filename(existing_task.keyword)
+                except UnsafePathError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
                 print(f"目标文件路径: {output_filename}")
                 print("开始调用 AI 生成新的分析标准...")
                 generated_criteria = await generate_criteria(

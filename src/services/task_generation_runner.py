@@ -5,18 +5,41 @@ import os
 
 import aiofiles
 
+from src.core.safe_paths import UnsafePathError, resolve_within
 from src.domain.models.task import TaskCreate, TaskGenerateRequest
 from src.prompt_utils import generate_criteria
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_service import TaskService
 
+#: 不允许被生成流程覆盖的 prompt 文件。``macbook_criteria.txt`` 是生成标准时喂给
+#: 模型的 few-shot 参考范例（见 src/prompt_utils.py），一旦被某个恰好叫 "macbook"
+#: 的关键词覆盖，之后所有生成任务的分析标准都会被污染。
+PROTECTED_PROMPT_FILES = frozenset({"base_prompt.txt", "macbook_criteria.txt"})
+
+
 def build_criteria_filename(keyword: str) -> str:
+    """由关键词推导 criteria 文件名。
+
+    除文件名净化外，额外拒绝两类会静默产生错误结果的情况：
+    1. 关键词退化后为空（例如 ``..``、``!!!``）——否则所有这类任务会共用
+       ``prompts/_criteria.txt`` 并互相覆盖；
+    2. 目标文件是受保护的 prompt（参考范例/基础模板）——否则会污染生成流程。
+    """
     safe_keyword = "".join(
         char for char in keyword.lower().replace(" ", "_")
         if char.isalnum() or char in "_-"
     ).rstrip()
-    return f"prompts/{safe_keyword}_criteria.txt"
+    if not safe_keyword:
+        raise UnsafePathError("关键词无法生成有效的文件名，请换一个更具体的关键词")
+
+    filename = f"{safe_keyword}_criteria.txt"
+    if filename in PROTECTED_PROMPT_FILES:
+        raise UnsafePathError(f"'{filename}' 是系统保留的 prompt 文件，不能作为生成目标")
+
+    # containment 兜底：即便净化逻辑将来被改动，也不允许越出 prompts/
+    resolve_within("prompts", filename)
+    return f"prompts/{filename}"
 
 
 def build_task_create(req: TaskGenerateRequest, criteria_file: str) -> TaskCreate:

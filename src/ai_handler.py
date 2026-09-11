@@ -26,6 +26,7 @@ from src.config import (
     ENABLE_RESPONSE_FORMAT,
     client,
 )
+from src.core.safe_paths import UnsafePathError, resolve_task_image_dir
 from src.ai_message_builder import (
     build_analysis_text_prompt,
     build_user_message_content,
@@ -150,7 +151,15 @@ async def download_all_images(product_id, image_urls, task_name="default", concu
         return []
 
     # 为每个任务创建独立的图片目录
-    task_image_dir = os.path.join(IMAGE_SAVE_DIR, f"{TASK_IMAGE_DIR_PREFIX}{task_name}")
+    # 注意：任务名必须先经校验并做 containment 检查，否则 "../../x" 这类名字
+    # 会让 makedirs/rmtree 越出 images/ 目录（见 src/core/safe_paths.py）。
+    task_image_dir = str(
+        resolve_task_image_dir(
+            task_name,
+            base_dir=IMAGE_SAVE_DIR,
+            prefix=TASK_IMAGE_DIR_PREFIX,
+        )
+    )
     os.makedirs(task_image_dir, exist_ok=True)
 
     urls = [url.strip() for url in image_urls if url.strip().startswith('http')]
@@ -197,8 +206,23 @@ async def download_all_images(product_id, image_urls, task_name="default", concu
 
 
 def cleanup_task_images(task_name):
-    """清理指定任务的图片目录"""
-    task_image_dir = os.path.join(IMAGE_SAVE_DIR, f"{TASK_IMAGE_DIR_PREFIX}{task_name}")
+    """清理指定任务的图片目录。
+
+    这是 C1 的删除点：任务名曾经被直接拼进路径后交给 ``shutil.rmtree``。
+    现在先校验+containment 检查，非法名字只记录并**拒绝删除**（fail-safe：
+    宁可留下垃圾目录，也不删错目录）。
+    """
+    try:
+        task_image_dir = resolve_task_image_dir(
+            task_name,
+            base_dir=IMAGE_SAVE_DIR,
+            prefix=TASK_IMAGE_DIR_PREFIX,
+        )
+    except UnsafePathError as exc:
+        safe_print(f"   [清理] 拒绝清理可疑任务名 '{task_name}' 的图片目录: {exc}")
+        return
+
+    task_image_dir = str(task_image_dir)
     if os.path.exists(task_image_dir):
         try:
             shutil.rmtree(task_image_dir)
