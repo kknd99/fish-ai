@@ -14,7 +14,6 @@ from src.infrastructure.config.env_manager import env_manager
 from src.infrastructure.config.settings import (
     AISettings,
     reload_settings,
-    scraper_settings,
 )
 from src.services.ai_request_compat import (
     CHAT_COMPLETIONS_API_MODE,
@@ -22,7 +21,6 @@ from src.services.ai_request_compat import (
     build_ai_request_params,
     create_ai_response_sync,
     is_chat_completions_api_unsupported_error,
-    is_responses_api_unsupported_error,
 )
 from src.services.ai_response_parser import extract_ai_response_content
 from src.services.notification_config_service import (
@@ -226,7 +224,10 @@ async def update_rotation_settings(settings: RotationSettingsModel):
 async def get_system_status(
     process_service: ProcessService = Depends(get_process_service),
 ):
-    state_file = "xianyu_state.json"
+    # 复用唯一来源，避免"同一个文件名写两处"（默认值相同，但是两个真相）
+    from src.infrastructure.config.settings import scraper_settings
+
+    state_file = scraper_settings.state_file
     login_state_exists = os.path.exists(state_file)
     env_file_exists = os.path.exists(env_manager.env_file)
     openai_api_key = env_manager.get_value("OPENAI_API_KEY", "")

@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.infrastructure.external.ai_client import AIClient, _sanitize_no_proxy_env
+# 该修补已合并进 ai_client_factory（两条 AI 路径共用），因此从新家导入
+from src.infrastructure.external.ai_client import AIClient
+from src.infrastructure.external.ai_client_factory import (
+    sanitize_no_proxy_env as _sanitize_no_proxy_env,
+)
 from src.services.ai_request_compat import build_responses_input
 
 

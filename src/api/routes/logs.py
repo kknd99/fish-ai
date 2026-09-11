@@ -188,16 +188,3 @@ async def clear_logs(
             status_code=500,
             content={"message": f"清空日志文件时出错: {e}"}
         )
-
-    if not os.path.exists(log_file_path):
-        return {"message": "日志文件不存在，无需清空。"}
-
-    try:
-        async with aiofiles.open(log_file_path, 'w', encoding='utf-8') as f:
-            await f.write("")
-        return {"message": "日志已成功清空。"}
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"message": f"清空日志文件时出错: {e}"}
-        )

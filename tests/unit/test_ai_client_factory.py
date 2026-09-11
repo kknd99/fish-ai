@@ -138,17 +138,51 @@ def test_build_client_creates_client_and_sanitizes(monkeypatch):
         asyncio.run(client.close())
 
 
-def test_both_paths_use_the_same_factory(monkeypatch):
-    """抓取侧（src/config.py 的模块级 client）与 API 侧（AIClient）必须同源。"""
+def test_ai_client_delegates_to_the_shared_factory(monkeypatch):
+    """API 侧必须真的调用这个工厂（行为断言，而不是断言某个名字还想等）。"""
+    from types import SimpleNamespace
+
     import src.infrastructure.external.ai_client as ai_client_module
+
+    calls = []
+
+    def fake_factory(**kwargs):
+        calls.append(kwargs)
+        return "fake-client"
+
+    monkeypatch.setattr(ai_client_module, "build_async_openai_client", fake_factory)
+
+    client = ai_client_module.AIClient.__new__(ai_client_module.AIClient)
+    client.settings = SimpleNamespace(
+        is_configured=lambda: True,
+        api_key="sk-canary",
+        base_url="http://127.0.0.1:9/v1",
+        proxy_url="http://proxy.local:8080",
+    )
+
+    assert client._initialize_client() == "fake-client"
+    assert calls == [
+        {
+            "api_key": "sk-canary",
+            "base_url": "http://127.0.0.1:9/v1",
+            "proxy_url": "http://proxy.local:8080",
+        }
+    ]
+
+
+def test_ai_client_returns_none_when_unconfigured():
+    from types import SimpleNamespace
+
+    import src.infrastructure.external.ai_client as ai_client_module
+
+    client = ai_client_module.AIClient.__new__(ai_client_module.AIClient)
+    client.settings = SimpleNamespace(is_configured=lambda: False)
+    assert client._initialize_client() is None
+
+
+def test_config_module_uses_the_shared_factory():
+    """抓取侧在导入时构造 client，必须绑定到同一个工厂函数。"""
+    import src.config as config_module
     import src.infrastructure.external.ai_client_factory as factory_module
 
-    assert ai_client_module.build_async_openai_client is factory_module.build_async_openai_client
-    assert ai_client_module._sanitize_no_proxy_env is factory_module.sanitize_no_proxy_env
-
-    import src.config as config_module
-
-    # config.py 在导入时构造 client；这里只验证它引用的是同一个工厂函数
-    assert "build_async_openai_client" in (
-        __import__("pathlib").Path(config_module.__file__).read_text(encoding="utf-8")
-    )
+    assert config_module.build_async_openai_client is factory_module.build_async_openai_client

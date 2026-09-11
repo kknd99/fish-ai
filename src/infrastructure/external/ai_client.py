@@ -2,20 +2,15 @@
 AI 客户端封装
 提供统一的 AI 调用接口
 """
-import ipaddress
 import os
 import json
 import base64
 from typing import Dict, List, Optional
-from datetime import datetime
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from src.ai_message_builder import build_analysis_messages
 from src.infrastructure.config.settings import AISettings
-from src.infrastructure.external.ai_client_factory import (
-    build_async_openai_client,
-    sanitize_no_proxy_env as _sanitize_no_proxy_env,
-)
+from src.infrastructure.external.ai_client_factory import build_async_openai_client
 from src.infrastructure.config.env_manager import env_manager
 from src.services.ai_request_compat import (
     CHAT_COMPLETIONS_API_MODE,
@@ -33,8 +28,6 @@ from src.services.ai_response_parser import (
     extract_ai_response_content,
     parse_ai_response_json,
 )
-
-from src.core.redact import redact_url
 
 
 class AIClient:

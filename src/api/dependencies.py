@@ -2,7 +2,6 @@
 FastAPI 依赖注入
 提供服务实例的创建和管理
 """
-from fastapi import Depends
 from src.services.task_service import TaskService
 from src.services.notification_service import NotificationService, build_notification_service
 from src.services.ai_service import AIAnalysisService

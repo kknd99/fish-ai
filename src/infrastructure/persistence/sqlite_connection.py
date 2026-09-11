@@ -211,6 +211,9 @@ def _prepare_database_file(path: str) -> None:
 
 def _apply_pragmas(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
+    # 说明：当前 schema 没有任何 FOREIGN KEY 声明，这条 PRAGMA 实际是空转。
+    # 保留它是为了将来加外键时默认生效；删除任务时的级联目前由
+    # src/api/routes/tasks.py 里的手写 DELETE 完成。
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
 

@@ -7,7 +7,6 @@ import sys
 import shutil
 import traceback
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 
 import requests
 
@@ -47,7 +46,7 @@ from src.services.ai_request_compat import (
     remove_temperature_param,
 )
 from src.services.notification_service import build_notification_service
-from src.utils import convert_goofish_link, retry_on_failure
+from src.utils import retry_on_failure
 
 
 def _positive_int(value, default: int) -> int:

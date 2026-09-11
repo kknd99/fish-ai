@@ -26,20 +26,9 @@ API_KEY = os.getenv("OPENAI_API_KEY")
 BASE_URL = os.getenv("OPENAI_BASE_URL")
 MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
 PROXY_URL = os.getenv("PROXY_URL")
-NTFY_TOPIC_URL = os.getenv("NTFY_TOPIC_URL")
-GOTIFY_URL = os.getenv("GOTIFY_URL")
-GOTIFY_TOKEN = os.getenv("GOTIFY_TOKEN")
-BARK_URL = os.getenv("BARK_URL")
-WX_BOT_URL = os.getenv("WX_BOT_URL")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-WEBHOOK_METHOD = os.getenv("WEBHOOK_METHOD", "POST").upper()
-WEBHOOK_HEADERS = os.getenv("WEBHOOK_HEADERS")
-WEBHOOK_CONTENT_TYPE = os.getenv("WEBHOOK_CONTENT_TYPE", "JSON").upper()
-WEBHOOK_QUERY_PARAMETERS = os.getenv("WEBHOOK_QUERY_PARAMETERS")
-WEBHOOK_BODY = os.getenv("WEBHOOK_BODY")
-PCURL_TO_MOBILE = os.getenv("PCURL_TO_MOBILE", "false").lower() == "true"
+# 通知渠道配置不在这里读取：唯一来源是 NotificationSettings
+# （src/infrastructure/config/settings.py）。这里曾有一份重复的 os.getenv 拷贝，
+# 结果是"两处都能配、行为却可能不一致"，已删除。
 RUN_HEADLESS = os.getenv("RUN_HEADLESS", "true").lower() != "false"
 LOGIN_IS_EDGE = os.getenv("LOGIN_IS_EDGE", "false").lower() == "true"
 RUNNING_IN_DOCKER = os.getenv("RUNNING_IN_DOCKER", "false").lower() == "true"

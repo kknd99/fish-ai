@@ -13,7 +13,6 @@ from src.services.decision import (
     DecisionServices,
     get_strategy,
 )
-from src.services.decision.registry import normalize_decision_mode
 
 
 SellerLoader = Callable[[str], Awaitable[dict]]
