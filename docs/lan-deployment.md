@@ -276,6 +276,8 @@ docker compose -f docker-compose.lan.yaml up -d --build
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 构建报 `Cannot find module '@/data/goofishRegions.json'` | 打包时排除模式没锚定，把 `web-ui/src/data/` 一起排除了 | 包内含 `.git`，在项目目录执行 `git checkout -- web-ui/src/data/goofishRegions.json` 即可本地还原，无需重新传输 |
+| 日志里出现 `Tini is not running as PID 1 ... zombie reaping won't work` | compose 写了 `init: true`，而镜像的 ENTRYPOINT 本身就是 tini，容器里出现了两个 tini | 本仓库的 `docker-compose.lan.yaml` 已去掉 `init: true`；若你用的是别的编排文件，删掉该行即可 |
+| 宿主机 8000 被占用，构建完才报 `address already in use` | compose 在创建容器时才绑定端口 | 在 `.env` 里加 `APP_PORT=8800`（改宿主端口，**不要**动 `SERVER_PORT`）|
 | `.env` 里改了密码，脚本仍提示要强口令 | 用 nano/vim 粘贴时光标在第 1 行，新值插到了**文件开头**，旧的 `admin123` 还在下面；读取取**最后一处** | `sed -i '/^WEB_PASSWORD=/d' .env` 后 `printf 'WEB_PASSWORD=%s\n' '新密码' >> .env`，再 `grep -n WEB_PASSWORD .env` 确认只剩一行 |
 | 部署完发现改动没生效 | 用了 `docker-compose.yaml`（拉上游镜像，无 `build`） | 改用 `docker-compose.lan.yaml` |
 | `config.json` 变成目录 / 应用读配置报错 | 单文件挂载点在宿主机不存在，Docker 建了目录 | 删掉那个目录，先 `touch`/写入真实文件再 `up` |

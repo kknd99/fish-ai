@@ -4,7 +4,6 @@
       "build": ".",
       "image": "ai-goofish-monitor:lan",
       "container_name": "ai-goofish-monitor-app",
-      "init": true,
       "ports": [
         "${APP_PORT:-8000}:8000"
       ],

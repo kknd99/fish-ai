@@ -25,7 +25,10 @@ services:
     build: .
     image: ai-goofish-monitor:lan
     container_name: ai-goofish-monitor-app
-    init: true
+    # 刻意不写 init: true：镜像的 ENTRYPOINT 本身就是 tini，若再加 Docker 注入的
+    # init，容器里会同时有两个 tini——Docker 的那个占 PID 1，镜像里的退到 PID 7，
+    # 于是启动时打印 "Tini is not running as PID 1 ... zombie reaping won't work"。
+    # 去掉后镜像自带的 tini 就是 PID 1，僵尸进程回收照常工作，日志也干净。
     ports:
       # 绑所有网卡，宿主端口可用 APP_PORT 覆盖（例：APP_PORT=9000 docker compose -f ... up -d）。
       # 只给部分网段访问请写具体地址，例如 "192.168.1.10:8000:8000"。
