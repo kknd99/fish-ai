@@ -42,7 +42,15 @@ from src.utils import (
     safe_get,
     save_to_jsonl,
 )
+from src.core.safe_paths import UnsafePathError, safe_account_state_path
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
+from src.services.rotation_policy import (
+    blacklist_disabled_warning,
+    can_rotate_account,
+    can_rotate_proxy,
+    compute_attempt_limit,
+    rotation_unavailable_hint,
+)
 from src.failure_guard import FailureGuard
 from src.services.account_strategy_service import resolve_account_runtime_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
@@ -1198,11 +1206,14 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         return processed_item_count
 
     processed_item_count = 0
-    attempt_limit = max(
-        rotation_settings["account_retry_limit"],
-        rotation_settings["proxy_retry_limit"],
-        1,
+    attempt_limit = compute_attempt_limit(
+        rotation_settings,
+        account_pool_size=len(account_pool.available_items()),
+        proxy_pool_size=len(proxy_pool.available_items()),
     )
+    rotation_warning = blacklist_disabled_warning(rotation_settings)
+    if rotation_warning:
+        print(rotation_warning)
     last_error = ""
     last_state_path: Optional[str] = None
 
@@ -1244,21 +1255,31 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         cleanup_task_images(task_config.get("task_name", "default"))
         return 0
 
+    # 由"失败类型"触发的强制轮换（登录失效换账号、风控换出口 IP），
+    # 与配置里 on_failure 模式的轮换走同一段逻辑，避免两处各改一份。
+    force_rotate_account = False
+    force_rotate_proxy = False
+
     for attempt in range(1, attempt_limit + 1):
         if attempt == 1:
             selected_account = _select_account()
             selected_proxy = _select_proxy()
         else:
-            if (
+            should_rotate_account = force_rotate_account or (
                 rotation_settings["account_enabled"]
                 and rotation_settings["account_mode"] == "on_failure"
-            ):
-                account_pool.mark_bad(selected_account, last_error)
-                selected_account = _select_account(force_new=True)
-            if (
+            )
+            should_rotate_proxy = force_rotate_proxy or (
                 rotation_settings["proxy_enabled"]
                 and rotation_settings["proxy_mode"] == "on_failure"
-            ):
+            )
+            force_rotate_account = False
+            force_rotate_proxy = False
+
+            if should_rotate_account:
+                account_pool.mark_bad(selected_account, last_error)
+                selected_account = _select_account(force_new=True)
+            if should_rotate_proxy:
                 proxy_pool.mark_bad(selected_proxy, last_error)
                 selected_proxy = _select_proxy(force_new=True)
 
@@ -1291,11 +1312,33 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         except LoginRequiredError as e:
             last_error = str(e)
             print(f"检测到登录失效/重定向: {e}")
+            # 这正是账号轮换该生效的场景：旧实现直接 break，于是池子里的其他
+            # 账号一次都没被用过，任务反而被 FailureGuard 暂停 24 小时。
+            if can_rotate_account(
+                rotation_settings,
+                available_accounts=[i.value for i in account_pool.available_items()],
+                current_account=selected_account.value if selected_account else None,
+                forced_account=forced_account,
+            ):
+                print("[轮换] 该登录态已失效，停用它并换用账号池中的其他账号重试...")
+                force_rotate_account = True
+                continue
+            print(rotation_unavailable_hint(rotation_settings, forced_account=forced_account))
             break
         except RiskControlError as e:
             last_error = str(e)
             print(f"检测到风控或验证触发: {e}")
-            # 风控验证通常不是简单轮换能解决的，避免无意义重试。
+            # 风控常与出口 IP 绑定，换代理是有意义的；换不了就按原行为中断，
+            # 交给 FailureGuard 计数暂停，避免无意义地反复触发风控。
+            if can_rotate_proxy(
+                rotation_settings,
+                available_proxies=[i.value for i in proxy_pool.available_items()],
+                current_proxy=selected_proxy.value if selected_proxy else None,
+            ):
+                print("[轮换] 风控常与出口 IP 相关，停用当前代理并换用其他代理重试...")
+                force_rotate_proxy = True
+                continue
+            print(rotation_unavailable_hint(rotation_settings, kind="proxy"))
             break
         except Exception as e:
             last_error = f"{type(e).__name__}: {e}"
