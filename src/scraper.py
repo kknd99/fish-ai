@@ -388,13 +388,66 @@ def _build_context_overrides(snapshot: dict) -> dict:
     return _clean_kwargs(overrides)
 
 
+#: 不能透传给浏览器的请求头。
+#:
+#: 快照里的 headers 是**浏览器自己生成**的，属于 Fetch 规范里的 forbidden header
+#: names。通过 CDP 强行设置（Playwright 的 extra_http_headers 就是这么做的）会让
+#: 请求被网络栈判为非法：实测在搜索页只要带上 `Sec-Fetch-*`，站点的跨域资源
+#: （g.alicdn.com 上的 JS/CSS）全部以 `net::ERR_INVALID_ARGUMENT` 失败，SPA 渲染
+#: 不出来、正文为空，于是抓不到任何商品。
+#:
+#: 实测（同一份登录态，仅改请求头）：
+#:   带 Sec-Fetch-*（三选一即可复现）→ 13 个资源失败、正文 0 字符
+#:   去掉全部 Sec-Fetch-*            → 6 个资源失败、正文约 6600 字符，正常渲染
+#: 该结论交替重复 3 轮均一致，非站点抖动。
+_FORBIDDEN_HEADER_NAMES = {
+    "accept-charset",
+    "accept-encoding",
+    "access-control-request-headers",
+    "access-control-request-method",
+    "connection",
+    "content-length",
+    "cookie",
+    "cookie2",
+    "date",
+    "dnt",
+    "expect",
+    "host",
+    "keep-alive",
+    "origin",
+    "referer",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    "via",
+}
+
+
+def _is_forbidden_header(name: str) -> bool:
+    """判断某个请求头是否由浏览器控制、不允许透传。"""
+    lowered = name.lower()
+    if lowered in _FORBIDDEN_HEADER_NAMES:
+        return True
+    # `Sec-` 前缀（Sec-Fetch-*、sec-ch-ua*）本身就是规范规定的保留前缀。
+    if lowered.startswith("sec-"):
+        return True
+    return lowered.startswith("proxy-")
+
+
 def _build_extra_headers(raw_headers: Optional[dict]) -> dict:
+    """从快照的 headers 里挑出可以安全透传的部分。
+
+    只保留浏览器不控制、且确实有意义的那些（例如 Accept-Language）。
+    其余一律丢弃：它们要么由浏览器按当前上下文自动生成，要么会破坏请求。
+    """
     if not raw_headers:
         return {}
-    excluded = {"cookie", "content-length"}
     headers = {}
     for key, value in raw_headers.items():
-        if not key or key.lower() in excluded or value is None:
+        if not key or value is None:
+            continue
+        if _is_forbidden_header(key):
             continue
         headers[key] = value
     return headers
