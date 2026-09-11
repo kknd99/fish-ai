@@ -7,6 +7,8 @@ import aiofiles
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from src.core.secure_files import restrict_file
+
 
 router = APIRouter(prefix="/api/login-state", tags=["login-state"])
 
@@ -30,8 +32,11 @@ async def update_login_state(
         raise HTTPException(status_code=400, detail="提供的内容不是有效的JSON格式。")
 
     try:
+        # 该文件是完整的闲鱼会话 cookie，必须以 0600 落盘（此前是默认的 0644，
+        # 同机其他用户/共享卷容器可直接读走）。
         async with aiofiles.open(state_file, 'w', encoding='utf-8') as f:
             await f.write(data.content)
+        restrict_file(state_file)
         return {"message": f"登录状态文件 '{state_file}' 已成功更新。"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"写入登录状态文件时出错: {e}")

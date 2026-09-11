@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
 from src.infrastructure.config.env_manager import env_manager
+from src.core.secure_files import restrict_file, secure_makedirs
 
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -39,7 +40,8 @@ def _state_dir() -> str:
 
 
 def _ensure_state_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+    # 账号文件就是 cookie jar，目录 0700
+    secure_makedirs(path)
 
 
 def _validate_name(name: str) -> str:
@@ -99,6 +101,8 @@ async def create_account(data: AccountCreate):
         raise HTTPException(status_code=409, detail="账号已存在")
     async with aiofiles.open(path, "w", encoding="utf-8") as f:
         await f.write(data.content)
+    # 账号文件就是浏览器 cookie jar，收紧到 0600
+    restrict_file(path)
     return {"message": "账号已添加", "name": account_name, "path": path}
 
 
@@ -113,6 +117,7 @@ async def update_account(name: str, data: AccountUpdate):
         raise HTTPException(status_code=404, detail="账号不存在")
     async with aiofiles.open(path, "w", encoding="utf-8") as f:
         await f.write(data.content)
+    restrict_file(path)
     return {"message": "账号已更新", "name": account_name, "path": path}
 
 

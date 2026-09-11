@@ -13,6 +13,7 @@ from typing import Awaitable, Callable, Dict, TextIO
 
 from src.ai_handler import send_ntfy_notification
 from src.config import STATE_FILE
+from src.core.secure_files import restrict_file
 from src.failure_guard import FailureGuard
 from src.infrastructure.persistence.sqlite_task_repository import find_task_by_name_sync
 from src.utils import build_task_log_path
@@ -84,6 +85,9 @@ class ProcessService:
         os.makedirs("logs", exist_ok=True)
         log_file_path = build_task_log_path(task_id, task_name)
         log_file_handle = open(log_file_path, "a", encoding="utf-8")
+        # 日志里会落代理凭据、带 token 的通知 URL、AI 调试转储，
+        # 而日志接口此前是匿名可读的
+        restrict_file(log_file_path)
         return log_file_path, log_file_handle
 
     def _build_spawn_command(self, task_name: str) -> list[str]:

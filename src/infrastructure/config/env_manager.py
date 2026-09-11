@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from src.core.secure_files import SECURE_FILE_MODE, restrict_file
+
 
 _PLAIN_ENV_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_./:-]+$")
 
@@ -21,9 +23,11 @@ class EnvManager:
         self._ensure_env_file_exists()
 
     def _ensure_env_file_exists(self):
-        """确保 .env 文件存在"""
+        """确保 .env 文件存在（并以 0600 创建：里面是各类 token）。"""
         if not self.env_file.exists():
-            self.env_file.touch()
+            fd = os.open(self.env_file, os.O_WRONLY | os.O_CREAT, SECURE_FILE_MODE)
+            os.close(fd)
+        restrict_file(self.env_file)
 
     def read_env(self) -> Dict[str, str]:
         """读取所有环境变量"""
@@ -90,6 +94,8 @@ class EnvManager:
             with open(self.env_file, 'w', encoding='utf-8') as f:
                 for key, value in env_vars.items():
                     f.write(f"{key}={self._serialize_value(value)}\n")
+            # 重写会沿用旧 inode 的权限，但若原文件是 0644（历史遗留）这里顺手收紧
+            restrict_file(self.env_file)
             return True
         except Exception as e:
             print(f"写入 .env 文件失败: {e}")
