@@ -114,7 +114,7 @@ def test_get_ai_analysis_retries_without_structured_output_when_model_rejects_it
     )
 
     assert result["reason"] == "ok"
-    assert request_history[0]["messages"][0]["role"] == "user"
+    assert [m["role"] for m in request_history[0]["messages"]] == ["system", "user"]
     assert request_history[0]["response_format"]["type"] == "json_object"
     assert "response_format" not in request_history[1]
     assert ai_handler.ENABLE_RESPONSE_FORMAT is True
@@ -165,7 +165,7 @@ def test_get_ai_analysis_falls_back_to_responses_when_chat_completions_api_is_mi
 
     assert result["reason"] == "ok"
     assert request_history[0][0] == "chat"
-    assert request_history[0][1]["messages"][0]["role"] == "user"
+    assert [m["role"] for m in request_history[0][1]["messages"]] == ["system", "user"]
     assert request_history[1][0] == "responses"
     assert request_history[1][1]["text"]["format"]["type"] == "json_object"
     assert request_history[2][0] == "responses"

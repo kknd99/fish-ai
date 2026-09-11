@@ -10,10 +10,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from src.ai_message_builder import (
-    build_analysis_text_prompt,
-    build_user_message_content,
-)
+from src.ai_message_builder import build_analysis_messages
 from src.infrastructure.config.settings import AISettings
 from src.infrastructure.config.env_manager import env_manager
 from src.services.ai_request_compat import (
@@ -173,13 +170,12 @@ class AIClient:
             if base64_img:
                 image_data_urls.append(f"data:image/jpeg;base64,{base64_img}")
 
-        text_prompt = build_analysis_text_prompt(
+        # 与 ai_handler 一致：规则进 system，不可信的卖家数据进 user
+        return build_analysis_messages(
             product_json,
             prompt_text,
-            include_images=bool(image_data_urls),
+            image_data_urls=image_data_urls,
         )
-        user_content = build_user_message_content(text_prompt, image_data_urls)
-        return [{"role": "user", "content": user_content}]
 
     async def _call_ai(
         self,

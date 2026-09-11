@@ -25,7 +25,12 @@ def test_build_messages_without_images_uses_text_only_content():
         "只分析文字描述和卖家资质。",
     )
 
-    content = messages[0]["content"]
+    # 信任边界：规则进 system，卖家可控的数据进 user
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert "只分析文字描述和卖家资质。" in messages[0]["content"]
+    assert "不可信数据" in messages[0]["content"]
+
+    content = messages[1]["content"]
     assert isinstance(content, str)
     assert "MacBook Pro M2" in content
     assert "未提供商品图片" in content
@@ -41,7 +46,10 @@ def test_build_messages_with_images_uses_multimodal_content(monkeypatch):
         "结合图片和文字综合判断。",
     )
 
-    content = messages[0]["content"]
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert "结合图片和文字综合判断。" in messages[0]["content"]
+
+    content = messages[1]["content"]
     assert isinstance(content, list)
     assert content[0]["type"] == "image_url"
     assert content[-1]["type"] == "text"

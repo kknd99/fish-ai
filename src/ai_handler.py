@@ -28,8 +28,7 @@ from src.config import (
 )
 from src.core.safe_paths import UnsafePathError, resolve_task_image_dir
 from src.ai_message_builder import (
-    build_analysis_text_prompt,
-    build_user_message_content,
+    build_analysis_messages,
 )
 from src.services.ai_response_parser import (
     EmptyAIResponseError,
@@ -58,9 +57,12 @@ def _positive_int(value, default: int) -> int:
         return default
 
 
-DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY = max(
-    1,
-    _positive_int(os.getenv("IMAGE_DOWNLOAD_CONCURRENCY", "3"), 3),
+#: 图片下载并发上限。与 AI 分析并发相乘决定单任务的外发压力，需封顶。
+MAX_IMAGE_DOWNLOAD_CONCURRENCY = 8
+
+DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY = min(
+    MAX_IMAGE_DOWNLOAD_CONCURRENCY,
+    max(1, _positive_int(os.getenv("IMAGE_DOWNLOAD_CONCURRENCY", "3"), 3)),
 )
 
 
@@ -166,7 +168,10 @@ async def download_all_images(product_id, image_urls, task_name="default", concu
     if not urls:
         return []
 
-    max_concurrency = _positive_int(concurrency, DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY)
+    max_concurrency = min(
+        MAX_IMAGE_DOWNLOAD_CONCURRENCY,
+        _positive_int(concurrency, DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY),
+    )
     semaphore = asyncio.Semaphore(max_concurrency)
     total_images = len(urls)
 
@@ -353,13 +358,13 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
             if base64_image:
                 image_data_urls.append(f"data:image/jpeg;base64,{base64_image}")
 
-    combined_text_prompt = build_analysis_text_prompt(
+    # 规则进 system、数据进 user：商品文本是卖家可控的不可信数据，
+    # 不能与判断标准挤在同一条消息里（安全审计 L3）。
+    messages = build_analysis_messages(
         product_details_json,
         system_prompt,
-        include_images=bool(image_data_urls),
+        image_data_urls=image_data_urls,
     )
-    user_content = build_user_message_content(combined_text_prompt, image_data_urls)
-    messages = [{"role": "user", "content": user_content}]
 
     # 保存最终传输内容到日志文件
     try:
