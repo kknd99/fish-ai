@@ -113,6 +113,8 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
         defaultValues.new_publish_option || props.initialData.new_publish_option || '__none__',
       region: defaultValues.region || props.initialData.region || '',
       decision_mode: defaultValues.decision_mode || props.initialData.decision_mode || 'ai',
+      trade_enabled: defaultValues.trade_enabled ?? props.initialData.trade_enabled ?? false,
+      trade_action: defaultValues.trade_action || props.initialData.trade_action || 'notify_link',
     }
     keywordRulesInput.value = (defaultValues.keyword_rules || props.initialData.keyword_rules || []).join('\n')
     // 编辑模式下，根据 cron 值判断模式
@@ -135,6 +137,8 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       new_publish_option: '__none__',
       region: '',
       decision_mode: 'ai',
+      trade_enabled: false,
+      trade_action: 'notify_link',
       ...defaultValues,
     }
     if (!form.value.account_strategy) {
@@ -246,6 +250,9 @@ function handleSubmit() {
   }
 
   submitData.decision_mode = decisionMode
+  // 交易：默认关闭；关闭时动作字段仍保留（后端有默认值，不影响行为）
+  submitData.trade_enabled = form.value.trade_enabled === true
+  submitData.trade_action = form.value.trade_action || 'notify_link'
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
   submitData.keyword_rules = decisionMode === 'keyword' ? keywordRules : []
@@ -434,6 +441,31 @@ function handleSubmit() {
         <div class="space-y-1 sm:col-span-3">
           <TaskRegionSelector v-model="form.region as any" />
           <p class="text-xs text-gray-500">{{ t('tasks.form.regionHint') }}</p>
+        </div>
+      </div>
+
+      <!-- 交易（半自动）：默认关闭，开启后命中会推送真实商品链接，仍需人工确认下单 -->
+      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+        <Label for="trade-enabled" class="sm:text-right">{{ t('tasks.form.tradeEnabled') }}</Label>
+        <div class="space-y-1 sm:col-span-3">
+          <Switch id="trade-enabled" v-model="form.trade_enabled" />
+          <p class="text-xs text-gray-500">{{ t('tasks.form.tradeEnabledHint') }}</p>
+        </div>
+      </div>
+      <div v-if="form.trade_enabled" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+        <Label class="sm:text-right">{{ t('tasks.form.tradeActionLabel') }}</Label>
+        <div class="space-y-1 sm:col-span-3">
+          <Select v-model="form.trade_action as any">
+            <SelectTrigger>
+              <SelectValue :placeholder="t('tasks.form.tradeAction.notifyLink')" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="notify_link">{{ t('tasks.form.tradeAction.notifyLink') }}</SelectItem>
+              <SelectItem value="dry_run">{{ t('tasks.form.tradeAction.dryRun') }}</SelectItem>
+              <SelectItem value="playwright_checkout">{{ t('tasks.form.tradeAction.playwrightCheckout') }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-gray-500">{{ t('tasks.form.tradeActionHint') }}</p>
         </div>
       </div>
     </div>

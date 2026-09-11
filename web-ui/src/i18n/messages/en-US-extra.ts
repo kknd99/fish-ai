@@ -104,6 +104,15 @@ const enUSExtra = {
         rotateDescription: 'Force this task to rotate through the account pool.',
       },
       publishOptions: { none: 'No Filter (default)', latest: 'Latest', oneDay: 'Within 1 Day', threeDays: 'Within 3 Days', sevenDays: 'Within 7 Days', fourteenDays: 'Within 14 Days' },
+      tradeEnabled: 'Enable trading (semi-automatic)',
+      tradeEnabledHint: 'On a match, push the real item link and let you confirm the order. It never pays and never submits an order behind your back.',
+      tradeActionLabel: 'Trade action',
+      tradeActionHint: 'Default only pushes the link; dry-run writes an audit row and takes no external action.',
+      tradeAction: {
+        notifyLink: 'Push link (recommended)',
+        dryRun: 'Dry run only (audit only)',
+        playwrightCheckout: 'Auto-submit order (not implemented)',
+      },
       validation: {
         incomplete: 'Incomplete information',
         nameAndKeywordRequired: 'Task name and keyword are required.',

@@ -104,6 +104,15 @@ const zhCNExtra = {
         rotateDescription: '当前任务强制使用账号池轮换。',
       },
       publishOptions: { none: '不筛选（默认）', latest: '最新', oneDay: '1天内', threeDays: '3天内', sevenDays: '7天内', fourteenDays: '14天内' },
+      tradeEnabled: '开启交易（半自动）',
+      tradeEnabledHint: '命中后推送真实商品链接，由你确认下单。系统不会自动付款，也不会在你不知情时提交订单。',
+      tradeActionLabel: '交易动作',
+      tradeActionHint: '默认只推送链接；演练模式只写审计记录，不产生任何外部动作。',
+      tradeAction: {
+        notifyLink: '推送链接（推荐）',
+        dryRun: '仅演练（只写审计）',
+        playwrightCheckout: '自动提交订单（尚未实现）',
+      },
       validation: {
         incomplete: '信息不完整',
         nameAndKeywordRequired: '任务名称和关键词不能为空。',

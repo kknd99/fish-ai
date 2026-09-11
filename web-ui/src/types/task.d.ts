@@ -20,9 +20,13 @@ export interface Task {
   free_shipping?: boolean;
   new_publish_option?: string | null;
   region?: string | null;
-  decision_mode: 'ai' | 'keyword';
+  // 后端已允许任何已注册的判定策略名，这里保留宽松类型以免前端锁死扩展点
+  decision_mode: string;
   keyword_rules: string[];
   is_running: boolean;
+  // 交易（默认关闭）：开启后命中会推送真实商品链接，仍需人工确认下单
+  trade_enabled?: boolean;
+  trade_action?: string;
 }
 
 export type TaskGenerationStatus = 'queued' | 'running' | 'completed' | 'failed';
