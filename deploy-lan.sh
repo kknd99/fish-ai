@@ -141,8 +141,56 @@ if [ "${#web_password}" -lt 8 ]; then
   fail "WEB_PASSWORD 太短（当前 ${#web_password} 位）。建议至少 12 位，混合大小写、数字与符号。"
 fi
 
-host_port="$(get_env APP_PORT)"
+host_port="${APP_PORT:-}"
+[ -n "$host_port" ] || host_port="$(get_env APP_PORT)"
 host_port="${host_port:-8000}"
+
+# 宿主端口预检。NAS 上 8000 经常被系统服务或别的容器占用，而 compose 报错是在
+# **构建完成之后**创建容器时——不预检就要白等一次完整构建（含下载 Chromium）。
+if command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1; then
+  if command -v ss >/dev/null 2>&1; then
+    listen_dump="$(ss -ltn 2>/dev/null | awk '{print $4}')"
+  else
+    # 用 -an 再筛 LISTEN，而不是 -ltn：macOS 的 `netstat -l` 行为不一致，实测会把
+    # 监听中的端口漏掉（只列出同一端口的 TIME_WAIT 记录）。也不用按行号跳表头：
+    # 表头行的第 4 个字段是 "Local"，不会匹配端口模式。
+    listen_dump="$(netstat -an 2>/dev/null | grep -i 'LISTEN' | awk '{print $4}')"
+  fi
+  if printf '%s\n' "$listen_dump" | grep -qE "[:.]${host_port}([^0-9]|$)"; then
+    {
+      printf '\n错误：宿主机端口 %s 已被占用，容器无法绑定这个端口。\n\n' "$host_port"
+      printf '当前占用情况：\n'
+      # 注意：这段是在 set -e 下执行的，任何一条管道失败都会让脚本**当场退出**、
+      # 把后面的提示全部吞掉。macOS 的 netstat 里 -p 是"指定协议"且需要参数，
+      # 所以这里统一不用 -p，并给管道兜底。
+      occupy_detail=""
+      if command -v ss >/dev/null 2>&1; then
+        occupy_detail="$(ss -ltnp 2>/dev/null | grep -E "[:.]${host_port}([^0-9]|$)" | head -3 || true)"
+      fi
+      if [ -z "$occupy_detail" ]; then
+        occupy_detail="$(netstat -an 2>/dev/null | grep -i 'LISTEN' | grep -E "[:.]${host_port}([^0-9]|$)" | head -3 || true)"
+      fi
+      if [ -n "$occupy_detail" ]; then
+        printf '%s\n' "$occupy_detail" | sed 's/^/  /'
+      else
+        printf '  （未能列出占用进程，可自行执行 ss -ltnp 或 lsof -i :%s 查看）\n' "$host_port"
+      fi
+      cat <<'TEXT'
+
+换一个宿主端口即可。注意：改的是 APP_PORT（宿主机端口），**不要**改 .env 里的
+SERVER_PORT（那是容器内监听端口，compose 已把它钉死为 8000）：
+
+  echo 'APP_PORT=8800' >> .env
+  bash deploy-lan.sh
+
+或者临时指定：APP_PORT=8800 bash deploy-lan.sh
+
+确认新端口空闲：ss -ltn | grep :8800
+TEXT
+    } >&2
+    exit 1
+  fi
+fi
 
 # ---------- 3. 单文件挂载点 ----------
 step 3/5 "准备单文件挂载点"
