@@ -148,3 +148,73 @@ def test_validate_account_state_dir_accepts_relative(good):
 def test_validate_account_state_dir_rejects_absolute_and_traversal(bad):
     with pytest.raises(UnsafePathError):
         validate_account_state_dir(bad)
+
+
+# --------------------------------------------------------------- 绝对路径（Docker 场景）
+#
+# 回归：最初把校验写成"必须相对路径"，这会直接打挂 Docker 部署 ——
+# 容器里 ACCOUNT_STATE_DIR=/app/state、ai_prompt_base_file=/app/prompts/xxx.txt
+# 都是绝对路径，于是每次抓取都会因"路径不合法"而失败，AI 分析也会被静默跳过。
+# 真正的安全性质是"必须落在允许的根目录内"，与写法无关。
+
+
+def test_absolute_prompt_path_inside_prompts_is_allowed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = tmp_path / "prompts" / "base_prompt.txt"
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text("规则", encoding="utf-8")
+
+    assert safe_prompt_path(str(prompt)) == prompt.resolve()
+    # 校验函数必须原样返回，不能改写数据库里的写法
+    assert validate_prompt_reference(str(prompt)) == str(prompt)
+
+
+def test_absolute_prompt_path_outside_prompts_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    secret = tmp_path / "outside.txt"
+    secret.write_text("secret", encoding="utf-8")
+
+    with pytest.raises(UnsafePathError):
+        safe_prompt_path(str(secret))
+
+
+def test_absolute_account_state_path_inside_state_dir_is_allowed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    account = tmp_path / "state" / "acc_1.json"
+    account.parent.mkdir(parents=True)
+    account.write_text("{}", encoding="utf-8")
+
+    assert safe_account_state_path(str(account)) == account.resolve()
+    assert validate_account_state_reference(str(account)) == str(account)
+
+
+def test_absolute_root_state_file_is_allowed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root_state = tmp_path / "xianyu_state.json"
+    root_state.write_text("{}", encoding="utf-8")
+
+    assert safe_account_state_path(str(root_state)) == root_state.resolve()
+
+
+def test_absolute_account_state_path_outside_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(UnsafePathError):
+        safe_account_state_path(str(outside))
+
+
+def test_absolute_state_dir_inside_project_is_allowed(tmp_path, monkeypatch):
+    """容器里 ACCOUNT_STATE_DIR 是绝对路径，必须放行。"""
+    monkeypatch.chdir(tmp_path)
+    assert validate_account_state_dir(str(tmp_path / "state")) == str(tmp_path / "state")
+
+
+def test_absolute_state_dir_outside_project_is_rejected(tmp_path, monkeypatch):
+    project = tmp_path / "app"
+    project.mkdir()
+    monkeypatch.chdir(project)
+
+    with pytest.raises(UnsafePathError):
+        validate_account_state_dir(str(tmp_path / "elsewhere"))

@@ -103,15 +103,16 @@ DEFAULT_ACCOUNT_STATE_DIR = "state"
 ROOT_STATE_FILE = "xianyu_state.json"
 
 
-def _normalize_relative_reference(value: object, *, field_label: str) -> str:
-    """把用户填写的相对路径规范化：统一分隔符、去掉前导 ``./``。"""
+def _normalize_reference(value: object, *, field_label: str) -> str:
+    """规范化用户填写的路径：统一分隔符、去掉前导 ``./``。
+
+    刻意**不在这里**拒绝绝对路径：Docker 部署下 ``ACCOUNT_STATE_DIR=/app/state``、
+    ``ai_prompt_base_file=/app/prompts/base_prompt.txt`` 都是合法的绝对写法。
+    真正的安全性质是"必须落在允许的根目录内"，由 :func:`_resolve_reference` 负责。
+    """
     raw = str(value or "").strip()
     if not raw:
         raise UnsafePathError(f"{field_label}不能为空")
-    if os.path.isabs(raw) or Path(raw).is_absolute():
-        raise UnsafePathError(f"{field_label}必须使用相对路径，不能是绝对路径: {raw}")
-    if raw.startswith("\\\\") or (len(raw) > 1 and raw[1] == ":"):
-        raise UnsafePathError(f"{field_label}必须是相对路径: {raw}")
 
     normalized = raw.replace("\\", "/")
     while normalized.startswith("./"):
@@ -119,31 +120,62 @@ def _normalize_relative_reference(value: object, *, field_label: str) -> str:
     return normalized
 
 
-def _resolve_under_base(
-    normalized: str,
+def _is_windows_drive_reference(raw: str) -> bool:
+    """Windows 盘符写法（``C:\\path``）——在任意平台上都按绝对路径对待。"""
+    return len(raw) > 1 and raw[1] == ":"
+
+
+def _is_absolute_reference(raw: str) -> bool:
+    """认绝对写法：POSIX 绝对路径、UNC（``\\\\server`` 或 ``//server``）、盘符。"""
+    return (
+        os.path.isabs(raw)
+        or Path(raw).is_absolute()
+        or raw.startswith("//")
+        or raw.startswith("\\\\")
+        or _is_windows_drive_reference(raw)
+    )
+
+
+def _resolve_reference(
+    value: object,
     base_dir: os.PathLike | str,
     *,
     field_label: str,
-    allow_bare_name: bool = False,
 ) -> Path:
-    """把已规范化的相对路径解析到 ``base_dir`` 之下。
+    """把引用解析到 ``base_dir`` 之内（相对与绝对写法都支持）。
 
-    比单纯的 containment 检查更严一档，目的是让契约一眼可审：
-    - 任何 ``..`` 组件直接拒绝（不依赖 ``resolve()`` 的归一化语义）；
-    - 允许省略 ``base_dir`` 前缀（``foo.txt`` 与 ``prompts/foo.txt`` 等价）；
-    - 解析结果必须指向**具体文件**，不能退化回目录本身。
+    契约：
+    - 相对写法不得含 ``..``，且允许省略 ``base_dir`` 前缀
+      （``foo.txt`` 与 ``prompts/foo.txt`` 等价）；
+    - 绝对写法允许，但解析结果必须落在 ``base_dir`` 之内；
+    - 结果必须指向**具体文件**，不能退化回目录本身。
     """
-    base = Path(base_dir)
+    raw = str(value or "").strip()
+    normalized = _normalize_reference(value, field_label=field_label)
+    base = Path(base_dir).resolve()
+
+    if _is_absolute_reference(raw):
+        resolved = Path(raw).resolve()
+        try:
+            resolved.relative_to(base)
+        except ValueError as exc:
+            raise UnsafePathError(
+                f"{field_label}必须位于 {base} 之内，实际为 {resolved}"
+            ) from exc
+        if resolved == base:
+            raise UnsafePathError(f"{field_label}必须指向具体文件：{raw}")
+        return resolved
+
     parts = [part for part in normalized.split("/") if part not in ("", ".")]
     if ".." in parts:
         raise UnsafePathError(f"{field_label}不能包含 '..'：{normalized}")
-    if parts and parts[0] == base.name:
+    if parts and parts[0] == Path(base_dir).name:
         parts = parts[1:]
     if not parts:
         raise UnsafePathError(f"{field_label}必须指向具体文件，而不是目录：{normalized}")
 
-    resolved = resolve_within(base, *parts)
-    if resolved == base.resolve():
+    resolved = resolve_within(base_dir, *parts)
+    if resolved == base:
         raise UnsafePathError(f"{field_label}必须指向具体文件：{normalized}")
     return resolved
 
@@ -157,15 +189,13 @@ def safe_prompt_path(
 
     ``ai_prompt_base_file`` / ``ai_prompt_criteria_file`` / ``ai_prompt_file`` 都是
     用户可控字符串，而爬虫子进程会用 ``open()`` 直接读它们，再原样塞进发往
-    ``OPENAI_BASE_URL`` 的请求里。因此这里强制：只接受相对路径、不得含 ``..``，
-    且解析后必须落在 ``prompts/`` 之内——``/etc/passwd``、``../../.env`` 一律拒绝。
+    ``OPENAI_BASE_URL`` 的请求里。因此这里强制：解析后必须落在 ``prompts/`` 之内
+    ——``/etc/passwd``、``../../.env`` 一律拒绝。
 
-    兼容两种写法：``base_prompt.txt`` 与 ``prompts/base_prompt.txt``。
+    兼容三种写法：``base_prompt.txt``、``prompts/base_prompt.txt``，以及落在
+    ``prompts/`` 之内的绝对路径（Docker 下 ``/app/prompts/base_prompt.txt`` 是常见配置）。
     """
-    normalized = _normalize_relative_reference(value, field_label="prompt 文件路径")
-    return _resolve_under_base(
-        normalized, base_dir, field_label="prompt 文件路径"
-    )
+    return _resolve_reference(value, base_dir, field_label="prompt 文件路径")
 
 
 def safe_account_state_path(
@@ -176,36 +206,58 @@ def safe_account_state_path(
 ) -> Path:
     """把 ``account_state_file`` 解析为受控路径。
 
-    允许两类取值：
-    1. 根目录的单账号文件 ``xianyu_state.json``；
-    2. ``ACCOUNT_STATE_DIR`` 内的文件（``acc_1.json`` 或 ``state/acc_1.json``）。
+    允许三类取值：
+    1. 根目录的单账号文件 ``xianyu_state.json``（含其绝对路径写法）；
+    2. ``ACCOUNT_STATE_DIR`` 内的文件（``acc_1.json`` 或 ``state/acc_1.json``）；
+    3. 上述文件的绝对路径写法——只要确实落在账号目录之内
+       （Docker 下 ``ACCOUNT_STATE_DIR=/app/state`` 会让池子里全是绝对路径）。
 
     其余一律拒绝：这个值会被当作 Playwright 的 ``storage_state`` 读取，
     任意路径等于"任意可读 JSON 都能当 cookie 用"。
     """
-    normalized = _normalize_relative_reference(value, field_label="账号登录态文件")
+    normalized = _normalize_reference(value, field_label="账号登录态文件")
+    raw = str(value or "").strip()
 
     root = Path(root_state_file)
     if normalized in {root.name, root.as_posix()}:
         return Path(root).resolve()
+    if _is_absolute_reference(raw) and Path(raw).resolve() == root.resolve():
+        return root.resolve()
 
-    return _resolve_under_base(
-        normalized,
-        state_dir,
-        field_label="账号登录态文件",
-    )
+    return _resolve_reference(value, state_dir, field_label="账号登录态文件")
 
 
 def validate_account_state_dir(value: object) -> str:
     """校验 ``ACCOUNT_STATE_DIR`` 设置项。
 
-    该值可通过设置接口改写，若放任绝对路径就等于"把账号文件写到任意目录/从任意目录读"，
-    因此只接受项目内的相对目录。
+    该值可通过设置接口改写，因此必须限制在**项目目录之内**（相对或绝对写法都可以，
+    以兼容 Docker 里的 ``/app/state``）。允许绝对路径不是为了放宽安全边界，而是因为
+    容器部署下它本来就是绝对路径；真正的边界是"不许指向项目之外"。
     """
-    normalized = _normalize_relative_reference(value, field_label="账号登录态目录")
-    normalized = normalized.rstrip("/")
+    raw = str(value or "").strip()
+    normalized = _normalize_reference(value, field_label="账号登录态目录").rstrip("/")
     if not normalized:
         raise UnsafePathError("账号登录态目录不能为空")
+
+    if _is_windows_drive_reference(raw):
+        # 盘符写法在 POSIX 上会被当成普通文件名（项目里多出一个叫 "C:\\state" 的目录），
+        # 语义混乱且无正当用途，直接拒绝。
+        raise UnsafePathError(f"账号登录态目录不能使用盘符写法: {raw}")
+
+    if _is_absolute_reference(raw):
+        # 绝对路径写法允许，但必须落在项目目录（当前工作目录）之内：
+        # Docker 下 WORKDIR=/app、ACCOUNT_STATE_DIR=/app/state 是正常配置；
+        # /tmp、/home/app/.config 这类则被拒绝。
+        resolved = Path(raw).resolve()
+        root = Path(os.getcwd()).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise UnsafePathError(
+                f"账号登录态目录必须位于项目目录 {root} 之内，实际为 {resolved}"
+            ) from exc
+        return normalized
+
     if ".." in normalized.split("/"):
         raise UnsafePathError("账号登录态目录不能包含 '..'")
     return normalized
