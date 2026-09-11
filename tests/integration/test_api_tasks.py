@@ -193,3 +193,58 @@ def test_delete_task_stops_runtime_and_reindexes_process_state(
     process_service = api_context["process_service"]
     assert process_service.stopped == [0]
     assert process_service.reindexed == []
+
+
+# ------------------------------------------------------- 交易字段（L1 接入）
+
+def test_task_trade_fields_default_to_off(api_client, sample_task_payload):
+    """新建任务默认不开启交易——接上交易链路后行为与从前一致。"""
+    response = api_client.post("/api/tasks/", json=sample_task_payload)
+    assert response.status_code == 200
+
+    created = response.json()["task"]
+    assert created["trade_enabled"] is False
+    assert created["trade_action"] == "notify_link"
+
+
+def test_task_trade_fields_round_trip(api_client, sample_task_payload):
+    payload = dict(sample_task_payload)
+    payload.update({"trade_enabled": True, "trade_action": "dry_run"})
+
+    response = api_client.post("/api/tasks/", json=payload)
+    assert response.status_code == 200
+    created = response.json()["task"]
+    assert created["trade_enabled"] is True
+    assert created["trade_action"] == "dry_run"
+
+    # 列表与详情都要带上（序列化走 model_dump，因此是自动包含的）
+    listed = api_client.get("/api/tasks").json()[0]
+    assert listed["trade_enabled"] is True
+    assert listed["trade_action"] == "dry_run"
+
+    detail = api_client.get("/api/tasks/0").json()
+    assert detail["trade_enabled"] is True
+
+    # 关闭交易（PATCH）
+    response = api_client.patch("/api/tasks/0", json={"trade_enabled": False})
+    assert response.status_code == 200
+    assert response.json()["task"]["trade_enabled"] is False
+
+
+def test_task_rejects_unknown_trade_action(api_client, sample_task_payload):
+    """动作名写错要在**创建时**就报错，而不是等到真要下单那一刻。"""
+    payload = dict(sample_task_payload)
+    payload.update({"trade_enabled": True, "trade_action": "auto_buy_everything"})
+
+    response = api_client.post("/api/tasks/", json=payload)
+    assert response.status_code == 422
+    assert "交易动作" in response.text
+
+
+def test_task_trade_action_is_case_insensitive(api_client, sample_task_payload):
+    payload = dict(sample_task_payload)
+    payload.update({"trade_action": "DRY_RUN"})
+
+    response = api_client.post("/api/tasks/", json=payload)
+    assert response.status_code == 200
+    assert response.json()["task"]["trade_action"] == "dry_run"

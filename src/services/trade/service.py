@@ -40,14 +40,19 @@ class TradeService:
         db_path: Optional[str] = None,
         notification_service=None,
         ai_settings=None,
+        adapter_name: Optional[str] = None,
     ) -> "TradeService":
-        """按当前配置装配一套交易服务。"""
+        """按当前配置装配一套交易服务。
+
+        ``adapter_name`` 用于**任务级覆盖**：任务可以指定自己的交易动作；
+        未指定时回落到全局 ``TRADE_ADAPTER``。
+        """
         # 现取配置：reload_settings() 会重新绑定模块级实例，导入时的引用会过期
         from src.infrastructure.config.settings import ai_settings as current_ai_settings
 
         resolved = settings or trade_settings
         adapter = build_adapter(
-            getattr(resolved, "adapter", "dry_run"),
+            adapter_name or getattr(resolved, "adapter", "dry_run"),
             notification_service=notification_service,
         )
         return cls(

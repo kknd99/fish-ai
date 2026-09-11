@@ -43,6 +43,7 @@ from src.utils import (
 from src.core.safe_paths import UnsafePathError, safe_account_state_path
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.services.decision import normalize_decision_mode
+from src.services.trade.pipeline import build_trade_runner, resolve_trade_db_path
 from src.services.site_adapter import (
     detail_response_predicate,
     get_site_adapter,
@@ -669,6 +670,11 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 ai_analyzer=get_ai_analysis,
                 notifier=send_ntfy_notification,
                 saver=save_to_jsonl,
+                # 交易链路：任务未开启交易时为 None，等于完全不接（默认部署行为不变）
+                trade_runner=build_trade_runner(
+                    task_config,
+                    db_path=resolve_trade_db_path(),
+                ),
             )
 
             # 增强反检测脚本（模拟真实移动设备）

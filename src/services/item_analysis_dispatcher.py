@@ -20,6 +20,8 @@ ImageDownloader = Callable[[str, list[str], str], Awaitable[list[str]]]
 AIAnalyzer = Callable[[dict, list[str], str], Awaitable[Optional[dict]]]
 Notifier = Callable[[dict, str], Awaitable[None]]
 Saver = Callable[[dict, str], Awaitable[bool]]
+#: 交易 runner：(记录, 判定结果) -> 任意结果；未开启交易时传 None（整条链路不接）
+TradeRunner = Callable[[dict, dict], Awaitable[object]]
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class ItemAnalysisDispatcher:
         ai_analyzer: AIAnalyzer,
         notifier: Notifier,
         saver: Saver,
+        trade_runner: Optional[TradeRunner] = None,
     ) -> None:
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
         self._skip_ai_analysis = skip_ai_analysis
@@ -57,6 +60,8 @@ class ItemAnalysisDispatcher:
         self._ai_analyzer = ai_analyzer
         self._notifier = notifier
         self._saver = saver
+        # 交易链路默认不接（None）：只有任务显式开启交易时 scraper 才会传入 runner
+        self._trade_runner = trade_runner
         self._tasks: set[asyncio.Task] = set()
         self.completed_count = 0
 
@@ -81,6 +86,21 @@ class ItemAnalysisDispatcher:
         if await self._saver(record, job.keyword):
             self.completed_count += 1
         await self._notify_if_recommended(item_data, record["ai_analysis"])
+        await self._maybe_trade(record)
+
+    async def _maybe_trade(self, record: dict) -> None:
+        """判定完成后的交易尝试（任务未开启交易时 ``_trade_runner`` 为 None）。
+
+        放在最后一步：即便交易侧出任何问题，商品也已入库、通知也已发出，
+        不会因为交易环节把一次成功的抓取变成失败。同时把异常兜住并打印 ——
+        TradeService.execute 本身不抛，但意图构造等外围代码仍可能出错。
+        """
+        if self._trade_runner is None:
+            return
+        try:
+            await self._trade_runner(record, record.get("ai_analysis") or {})
+        except Exception as exc:  # noqa: BLE001 - 交易失败不应影响抓取主流程
+            print(f"   [交易] 交易流程异常（不影响本次抓取）: {exc}")
 
     async def _load_seller_info(self, job: ItemAnalysisJob) -> dict:
         seller_info = {}
