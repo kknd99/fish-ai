@@ -28,6 +28,11 @@ def test_frontend_build_output_path_is_consistent_across_configs():
         in frontend_dockerfile
     ), "Frontend-only Docker build must use the Vite build output path."
     assert "dist/" in dockerignore_lines
-    assert "web-ui/dist" not in dockerignore_lines
+    # 说明（修正上游的陈旧断言）：这里原本断言 "web-ui/dist" **不在** .dockerignore 里，
+    # 但它同样是构建产物 —— 放进 build context 只会把宿主机的旧构建带进镜像。
+    # 两条排除都保留，才是"构建产物一律不进上下文"的一致性。
+    assert "web-ui/dist" in dockerignore_lines, (
+        "web-ui/dist 属于构建产物，应从 build context 中排除"
+    )
     assert '[ ! -d "dist" ]' in start_script
     assert "cp -r web-ui/dist ./" not in start_script

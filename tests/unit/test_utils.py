@@ -51,4 +51,17 @@ def test_save_to_jsonl(tmp_path, monkeypatch):
             sort_order="asc",
         )
     )
-    assert records == [record]
+    assert records, "记录应当已入库并能读回"
+    stored = records[0]
+
+    # 原字段必须逐字保留（写进去什么，读回来就是什么）
+    for key, value in record.items():
+        assert stored[key] == value, f"字段 {key} 在往返后发生了变化"
+
+    # 读取路径会**叠加**可见性字段：黑名单命中与隐藏状态是在读取时计算的，不落库。
+    # 上游测试原本断言"读回的记录与写入记录完全相等"，那个前提已不成立；
+    # 这里改为把叠加字段的契约写清楚，避免下次又有人按旧前提改测试。
+    assert stored["_status"] == "active"
+    assert stored["_matched_blacklist_keywords"] == []
+    assert stored["_hidden_reason"] is None
+    assert stored["_effective_hidden"] is False

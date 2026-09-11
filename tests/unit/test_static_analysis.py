@@ -9,13 +9,24 @@
 "写起来像对、跑起来必崩"的错误。其余告警（未使用的导入、无占位符的 f-string）
 不属于本测试范围，避免噪音导致没人看。
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pyflakes", reason="需要 pyflakes（见 requirements.txt）")
+try:
+    import pyflakes  # noqa: F401
+except ImportError:  # pragma: no cover - 取决于本地环境
+    pyflakes = None
+
+if pyflakes is None:
+    if os.environ.get("CI"):
+        # CI 里静默跳过等于这道防线不存在：requirements.txt 已包含 pyflakes，
+        # 因此 CI 上必须装好，缺了就是配置问题，要显式失败。
+        pytest.fail("CI 环境缺少 pyflakes（requirements.txt 应已包含）")
+    pytest.skip("需要 pyflakes（见 requirements.txt）", allow_module_level=True)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TARGETS = ["src", "spider_v2.py", "desktop_launcher.py"]
