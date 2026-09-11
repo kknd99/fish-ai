@@ -252,6 +252,15 @@ const zhCNExtra = {
       urlLabel: '企业微信 Bot URL',
       configuredHint: '已保存机器人地址。',
     },
+    feishu: {
+      title: '飞书机器人',
+      description: 'Webhook 地址含 token，不回显，仅支持更新或清空。',
+      urlLabel: '飞书 Webhook 地址',
+      configuredHint: '已保存 Webhook 地址。',
+      secretLabel: '签名校验 Secret（可选）',
+      secretOptionalHint: '机器人未开启「签名校验」时可留空。',
+      secretConfiguredHint: '已保存 Secret（机器人开启签名校验时必需）。',
+    },
     telegram: {
       description: 'Bot Token 属于敏感字段，Chat ID 与反代地址可直接查看和修改。',
       chatIdPlaceholder: '例如：123456789',
