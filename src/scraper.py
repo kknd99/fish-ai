@@ -44,6 +44,7 @@ from src.utils import (
 )
 from src.core.safe_paths import UnsafePathError, safe_account_state_path
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
+from src.services.decision import normalize_decision_mode
 from src.services.rotation_policy import (
     blacklist_disabled_warning,
     can_rotate_account,
@@ -507,9 +508,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     max_price = task_config.get("max_price")
     ai_prompt_text = task_config.get("ai_prompt_text", "")
     analyze_images = _should_analyze_images(task_config)
-    decision_mode = str(task_config.get("decision_mode", "ai")).strip().lower()
-    if decision_mode not in {"ai", "keyword"}:
-        decision_mode = "ai"
+    # 归一化依据是判定策略注册表（新增策略后无需改这里）
+    decision_mode = normalize_decision_mode(task_config.get("decision_mode"))
     keyword_rules = task_config.get("keyword_rules") or []
     free_shipping = task_config.get("free_shipping", False)
     raw_new_publish = task_config.get("new_publish_option") or ""

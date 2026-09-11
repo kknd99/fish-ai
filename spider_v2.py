@@ -9,6 +9,7 @@ import re
 
 from src.config import STATE_FILE
 from src.core.safe_paths import UnsafePathError, safe_prompt_path
+from src.services.decision import normalize_decision_mode, strategy_requires_prompt
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.scraper import scrape_xianyu
 
@@ -99,9 +100,7 @@ async def main():
 
     # 读取所有prompt文件内容（关键词模式不需要加载prompt）
     for task in tasks_config:
-        decision_mode = str(task.get("decision_mode", "ai")).strip().lower()
-        if decision_mode not in {"ai", "keyword"}:
-            decision_mode = "ai"
+        decision_mode = normalize_decision_mode(task.get("decision_mode"))
         task["decision_mode"] = decision_mode
         keyword_rules = task.get("keyword_rules")
         if keyword_rules is None and task.get("keyword_rule_groups") is not None:
@@ -109,7 +108,8 @@ async def main():
         else:
             task["keyword_rules"] = normalize_keywords(keyword_rules)
 
-        if decision_mode == "keyword":
+        # 是否需要 prompt 由策略自己声明，这里不再硬编码 "keyword"
+        if not strategy_requires_prompt(decision_mode):
             task["ai_prompt_text"] = ""
             continue
 

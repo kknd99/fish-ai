@@ -9,6 +9,11 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.core.cron_utils import validate_cron_expression
+from src.services.decision import (
+    is_registered,
+    normalize_decision_mode,
+    strategy_meta,
+)
 from src.core.safe_paths import (
     validate_account_state_reference,
     validate_prompt_reference,
@@ -203,7 +208,7 @@ class TaskCreate(BaseModel):
     free_shipping: bool = True
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
-    decision_mode: Literal["ai", "keyword"] = "ai"
+    decision_mode: str = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -236,6 +241,20 @@ class TaskCreate(BaseModel):
     def validate_cron(cls, value):
         return _validate_cron_expression(value)
 
+    @field_validator("decision_mode", mode="before")
+    @classmethod
+    def check_decision_mode(cls, value):
+        """API 边界保持严格：只接受已注册的判定策略名。
+
+        运行时对历史脏数据的宽松归一化在 scraper / spider_v2 里（回退到默认策略），
+        这里则拒绝拼写错误，避免"写错了却静默按 AI 跑"。
+        """
+        if value is None:
+            return None
+        if not is_registered(value):
+            raise ValueError(f"不支持的判定方式: {value}")
+        return normalize_decision_mode(value)
+
     @field_validator("keyword_rules", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
@@ -243,11 +262,14 @@ class TaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision_mode_payload(self):
+        # 校验依据来自判定策略声明的元信息，而不是硬编码 "ai"/"keyword"：
+        # 新增一种判定方式时，"是否需要详细需求 / 关键词规则"跟着策略走。
+        meta = strategy_meta(normalize_decision_mode(self.decision_mode))
         description = str(self.description or "").strip()
-        if self.decision_mode == "ai" and not description:
-            raise ValueError("AI 判断模式下，详细需求(description)不能为空。")
-        if self.decision_mode == "keyword" and not _has_keyword_rules(self.keyword_rules):
-            raise ValueError("关键词判断模式下，至少需要一个关键词。")
+        if meta.requires_description and not description:
+            raise ValueError(f"{meta.display_name}模式下，详细需求(description)不能为空。")
+        if meta.requires_keyword_rules and not _has_keyword_rules(self.keyword_rules):
+            raise ValueError(f"{meta.display_name}模式下，至少需要一个关键词。")
         if self.account_strategy == "fixed" and not self.account_state_file:
             raise ValueError("固定账号模式下必须选择账号。")
         return self
@@ -296,9 +318,19 @@ class TaskUpdate(BaseModel):
     free_shipping: Optional[bool] = None
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
-    decision_mode: Optional[Literal["ai", "keyword"]] = None
+    decision_mode: Optional[str] = None
     keyword_rules: Optional[List[str]] = None
     is_running: Optional[bool] = None
+
+    @field_validator("decision_mode", mode="before")
+    @classmethod
+    def check_decision_mode(cls, value):
+        """同 TaskCreate：API 边界只接受已注册的判定策略名。"""
+        if value is None:
+            return None
+        if not is_registered(value):
+            raise ValueError(f"不支持的判定方式: {value}")
+        return normalize_decision_mode(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -365,7 +397,7 @@ class TaskGenerateRequest(BaseModel):
     free_shipping: bool = True
     new_publish_option: Optional[str] = None
     region: Optional[str] = None
-    decision_mode: Literal["ai", "keyword"] = "ai"
+    decision_mode: str = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -398,6 +430,20 @@ class TaskGenerateRequest(BaseModel):
     def empty_str_to_none_for_strings(cls, value):
         return _normalize_optional_string(value)
 
+    @field_validator("decision_mode", mode="before")
+    @classmethod
+    def check_decision_mode(cls, value):
+        """API 边界保持严格：只接受已注册的判定策略名。
+
+        运行时对历史脏数据的宽松归一化在 scraper / spider_v2 里（回退到默认策略），
+        这里则拒绝拼写错误，避免"写错了却静默按 AI 跑"。
+        """
+        if value is None:
+            return None
+        if not is_registered(value):
+            raise ValueError(f"不支持的判定方式: {value}")
+        return normalize_decision_mode(value)
+
     @field_validator("keyword_rules", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
@@ -405,11 +451,13 @@ class TaskGenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision_mode_payload(self):
+        # 校验依据来自判定策略声明的元信息，而不是硬编码 "ai"/"keyword"
+        meta = strategy_meta(normalize_decision_mode(self.decision_mode))
         description = str(self.description or "").strip()
-        if self.decision_mode == "ai" and not description:
-            raise ValueError("AI 判断模式下，详细需求(description)不能为空。")
-        if self.decision_mode == "keyword" and not _has_keyword_rules(self.keyword_rules):
-            raise ValueError("关键词判断模式下，至少需要一个关键词。")
+        if meta.requires_description and not description:
+            raise ValueError(f"{meta.display_name}模式下，详细需求(description)不能为空。")
+        if meta.requires_keyword_rules and not _has_keyword_rules(self.keyword_rules):
+            raise ValueError(f"{meta.display_name}模式下，至少需要一个关键词。")
         if self.account_strategy == "fixed" and not self.account_state_file:
             raise ValueError("固定账号模式下必须选择账号。")
         return self

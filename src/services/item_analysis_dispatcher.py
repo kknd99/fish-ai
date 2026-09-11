@@ -8,7 +8,12 @@ import os
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
-from src.keyword_rule_engine import build_search_text, evaluate_keyword_rules
+from src.services.decision import (
+    DecisionContext,
+    DecisionServices,
+    get_strategy,
+)
+from src.services.decision.registry import normalize_decision_mode
 
 
 SellerLoader = Callable[[str], Awaitable[dict]]
@@ -91,59 +96,28 @@ class ItemAnalysisDispatcher:
         return merged
 
     async def _build_analysis_result(self, job: ItemAnalysisJob, record: dict) -> dict:
-        if job.decision_mode == "keyword":
-            return self._build_keyword_result(job, record)
-        if self._skip_ai_analysis:
-            return self._build_skip_ai_result()
-        return await self._run_ai_analysis(job, record)
+        """把判定交给注册表里对应的策略。
 
-    def _build_keyword_result(self, job: ItemAnalysisJob, record: dict) -> dict:
-        search_text = build_search_text(record)
-        return evaluate_keyword_rules(list(job.keyword_rules), search_text)
-
-    def _build_skip_ai_result(self) -> dict:
-        return {
-            "analysis_source": "ai",
-            "is_recommended": True,
-            "reason": "商品已跳过AI分析，直接通知",
-            "keyword_hit_count": 0,
-        }
-
-    def _build_ai_error_result(self, reason: str, *, error: str = "") -> dict:
-        payload = {
-            "analysis_source": "ai",
-            "is_recommended": False,
-            "reason": reason,
-            "keyword_hit_count": 0,
-        }
-        if error:
-            payload["error"] = error
-        return payload
-
-    async def _run_ai_analysis(self, job: ItemAnalysisJob, record: dict) -> dict:
-        image_paths: list[str] = []
-        try:
-            image_paths = await self._download_images(job, record)
-            if not job.prompt_text:
-                return self._build_ai_error_result("任务未配置AI prompt，跳过分析。")
-            ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text)
-            if not ai_result:
-                return self._build_ai_error_result(
-                    "AI analysis returned None after retries.",
-                    error="AI analysis returned None after retries.",
-                )
-            ai_result.setdefault("analysis_source", "ai")
-            ai_result.setdefault("keyword_hit_count", 0)
-            return ai_result
-        except Exception as exc:
-            return self._build_ai_error_result(
-                f"AI分析异常: {exc}",
-                error=str(exc),
-            )
-        finally:
-            self._cleanup_images(image_paths)
+        以前这里是 ``if job.decision_mode == "keyword"`` 的二选一，另外两处
+        （``spider_v2`` 决定是否加载 prompt、``scraper`` 归一化）也各有一份判断；
+        现在分派只发生在这里，新增策略不必再改这三处。
+        """
+        strategy = get_strategy(job.decision_mode)
+        context = DecisionContext(
+            task_name=job.task_name,
+            prompt_text=job.prompt_text,
+            keyword_rules=tuple(job.keyword_rules or ()),
+            services=DecisionServices(
+                download_images=lambda rec: self._download_images(job, rec),
+                cleanup_images=self._cleanup_images,
+                ai_analyzer=self._ai_analyzer,
+                skip_ai_analysis=self._skip_ai_analysis,
+            ),
+        )
+        return await strategy.analyze(record, context)
 
     async def _download_images(self, job: ItemAnalysisJob, record: dict) -> list[str]:
+        """下载商品图片（判定策略通过 DecisionServices 注入的能力之一）。"""
         if not job.analyze_images:
             return []
         item_data = record.get("商品信息", {}) or {}
