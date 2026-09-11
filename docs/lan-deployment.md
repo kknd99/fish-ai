@@ -37,9 +37,9 @@ pull_policy: always      # 每次 up 都去拉上游镜像
 ```bash
 # 在源机器上执行，target 换成目标机的用户名@IP
 rsync -av --progress \
-  --exclude '__pycache__' --exclude 'node_modules' --exclude 'dist' \
-  --exclude '.pytest_cache' --exclude '.venv' \
-  --exclude '.env' --exclude 'logs/*' --exclude 'images/*' --exclude 'jsonl/*' \
+  --exclude '__pycache__' --exclude 'node_modules' --exclude '.pytest_cache' --exclude '.venv' \
+  --exclude '/dist' --exclude '/web-ui/dist' \
+  --exclude '.env' --exclude '/logs/*' --exclude '/images/*' --exclude '/jsonl/*' \
   /Users/mc/Documents/ai-goofish-monitor/ target:/volume1/docker/xyfish/
 ```
 
@@ -57,11 +57,21 @@ rsync -av --progress \
 
 ```bash
 # 在源机器上打包
+# 排除模式必须锚定到包内路径：写成 --exclude='data' 会连带删掉
+# web-ui/src/data/（前端构建会报 Cannot find module '@/data/goofishRegions.json'）
 tar czf ai-goofish-lan-deploy.tar.gz \
-  --exclude='__pycache__' --exclude='node_modules' --exclude='dist' \
-  --exclude='.pytest_cache' --exclude='.venv' --exclude='.env' \
-  --exclude='logs' --exclude='images' --exclude='jsonl' --exclude='state' \
-  --exclude='data' --exclude='price_history' --exclude='xianyu_state.json' \
+  --exclude='__pycache__' --exclude='node_modules' \
+  --exclude='.pytest_cache' --exclude='.venv' \
+  --exclude='ai-goofish-monitor/.env' \
+  --exclude='ai-goofish-monitor/xianyu_state.json' \
+  --exclude='ai-goofish-monitor/dist' \
+  --exclude='ai-goofish-monitor/web-ui/dist' \
+  --exclude='ai-goofish-monitor/data' \
+  --exclude='ai-goofish-monitor/logs' \
+  --exclude='ai-goofish-monitor/images' \
+  --exclude='ai-goofish-monitor/jsonl' \
+  --exclude='ai-goofish-monitor/state' \
+  --exclude='ai-goofish-monitor/price_history' \
   -C /Users/mc/Documents ai-goofish-monitor
 
 scp ai-goofish-lan-deploy.tar.gz target:/volume1/docker/
@@ -249,14 +259,14 @@ docker compose -f docker-compose.lan.yaml up -d --build
 - **挂载文件属 root**：镜像内以 root 运行，bind mount 落盘的 `data/`、`logs/` 等属 root。
   想在宿主机直接改，`sudo chown -R $USER:$USER data logs jsonl state price_history`。
 
-### 群晖 / NAS 上的几点差异
+### 群晖 / 绿联等 NAS 上的几点差异
 
 - **先确认架构**：`uname -m`。必须是 `x86_64` 或 `aarch64`；如果是 `armv7l`（32 位
   ARM 的老型号），Playwright 的 Chromium 没有对应构建，这个项目在 Docker 里跑不起来。
 - **内存**：Chromium 加 Python 进程，建议 2 GB 以上可用内存；低配型号容易在抓取时被 OOM 杀掉。
 - **权限**：群晖上 `docker` 组的配置不保证生效，最省事是直接 `sudo bash deploy-lan.sh`
   （脚本会提示你这一点）。用 sudo 后 bind mount 出来的 `data/`、`logs/` 属 root，
-  想在「File Station」里直接改就 `sudo chown -R $USER:users data logs jsonl state`。
+  想在文件管理器里直接改就 `sudo chown -R "$(id -u):$(id -g)" data logs jsonl state`。
 - **没有 SELinux**：挂载上的 `:z` 是空操作，不用管。
 - **图形界面替代方案**：群晖 Container Manager 的「项目」功能也能跑，把
   `docker-compose.lan.yaml` 的内容粘进去即可；但用命令行跑脚本更直接，日志也更好看。
@@ -265,6 +275,7 @@ docker compose -f docker-compose.lan.yaml up -d --build
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| 构建报 `Cannot find module '@/data/goofishRegions.json'` | 打包时排除模式没锚定，把 `web-ui/src/data/` 一起排除了 | 包内含 `.git`，在项目目录执行 `git checkout -- web-ui/src/data/goofishRegions.json` 即可本地还原，无需重新传输 |
 | `.env` 里改了密码，脚本仍提示要强口令 | 用 nano/vim 粘贴时光标在第 1 行，新值插到了**文件开头**，旧的 `admin123` 还在下面；读取取**最后一处** | `sed -i '/^WEB_PASSWORD=/d' .env` 后 `printf 'WEB_PASSWORD=%s\n' '新密码' >> .env`，再 `grep -n WEB_PASSWORD .env` 确认只剩一行 |
 | 部署完发现改动没生效 | 用了 `docker-compose.yaml`（拉上游镜像，无 `build`） | 改用 `docker-compose.lan.yaml` |
 | `config.json` 变成目录 / 应用读配置报错 | 单文件挂载点在宿主机不存在，Docker 建了目录 | 删掉那个目录，先 `touch`/写入真实文件再 `up` |
