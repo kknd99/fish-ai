@@ -8,6 +8,7 @@ import contextlib
 import re
 
 from src.config import STATE_FILE
+from src.core.safe_paths import UnsafePathError, safe_prompt_path
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.scraper import scrape_xianyu
 
@@ -114,9 +115,13 @@ async def main():
 
         if task.get("enabled", False) and task.get("ai_prompt_base_file") and task.get("ai_prompt_criteria_file"):
             try:
-                with open(task["ai_prompt_base_file"], 'r', encoding='utf-8') as f_base:
+                # prompt 文件路径必须落在 prompts/ 内：这些内容会被原样送进发往
+                # OPENAI_BASE_URL 的请求，任意路径等于任意文件外带（见安全审计 H2）。
+                base_path = safe_prompt_path(task["ai_prompt_base_file"])
+                criteria_path = safe_prompt_path(task["ai_prompt_criteria_file"])
+                with open(base_path, 'r', encoding='utf-8') as f_base:
                     base_prompt = f_base.read()
-                with open(task["ai_prompt_criteria_file"], 'r', encoding='utf-8') as f_criteria:
+                with open(criteria_path, 'r', encoding='utf-8') as f_criteria:
                     criteria_text = f_criteria.read()
                 
                 # 动态组合成最终的Prompt
@@ -130,6 +135,9 @@ async def main():
                 else:
                     print(f"✅ 任务 '{task['task_name']}' 的prompt生成成功，长度: {len(task['ai_prompt_text'])} 字符")
 
+            except UnsafePathError as e:
+                print(f"错误: 任务 '{task['task_name']}' 的prompt文件路径不合法（{e}），该任务的AI分析将被跳过。")
+                task['ai_prompt_text'] = ""
             except FileNotFoundError as e:
                 print(f"警告: 任务 '{task['task_name']}' 的prompt文件缺失: {e}，该任务的AI分析将被跳过。")
                 task['ai_prompt_text'] = ""
@@ -138,9 +146,13 @@ async def main():
                 task['ai_prompt_text'] = ""
         elif task.get("enabled", False) and task.get("ai_prompt_file"):
             try:
-                with open(task["ai_prompt_file"], 'r', encoding='utf-8') as f:
+                prompt_path = safe_prompt_path(task["ai_prompt_file"])
+                with open(prompt_path, 'r', encoding='utf-8') as f:
                     task['ai_prompt_text'] = f.read()
                 print(f"✅ 任务 '{task['task_name']}' 的prompt文件读取成功，长度: {len(task['ai_prompt_text'])} 字符")
+            except UnsafePathError as e:
+                print(f"错误: 任务 '{task['task_name']}' 的prompt文件路径不合法（{e}），该任务的AI分析将被跳过。")
+                task['ai_prompt_text'] = ""
             except FileNotFoundError:
                 print(f"警告: 任务 '{task['task_name']}' 的prompt文件 '{task['ai_prompt_file']}' 未找到，该任务的AI分析将被跳过。")
                 task['ai_prompt_text'] = ""

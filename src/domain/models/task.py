@@ -9,7 +9,11 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.core.cron_utils import validate_cron_expression
-from src.core.safe_paths import validate_task_name
+from src.core.safe_paths import (
+    validate_account_state_reference,
+    validate_prompt_reference,
+    validate_task_name,
+)
 from src.services.account_strategy_service import (
     clean_account_state_file,
     normalize_account_strategy,
@@ -168,6 +172,19 @@ class TaskCreate(BaseModel):
         必须在输入边界拦住穿越型名字，否则可导致任意目录删除/写入。"""
         return validate_task_name(value)
 
+    @field_validator("ai_prompt_base_file", "ai_prompt_criteria_file", mode="before")
+    @classmethod
+    def check_prompt_reference(cls, value):
+        """prompt 文件路径必须落在 prompts/ 内。
+
+        这些内容会被爬虫子进程读取并原样送进发往 OPENAI_BASE_URL 的请求，
+        任意路径等于"任意本地文件都能被外带"（安全审计 H2）。空值放行，
+        由后续业务校验（AI 模式必须给出判断标准）负责报错。
+        """
+        if value is None or not str(value).strip():
+            return value
+        return validate_prompt_reference(value)
+
     task_name: str
     enabled: bool = True
     keyword: str
@@ -206,7 +223,12 @@ class TaskCreate(BaseModel):
     @field_validator("account_state_file", mode="before")
     @classmethod
     def normalize_account_state_file(cls, value):
-        return clean_account_state_file(value)
+        cleaned = clean_account_state_file(value)
+        if cleaned:
+            # 该文件会被当作 Playwright 的 storage_state 读取，
+            # 任意路径等于"任意可读 JSON 都能当 cookie 用"。
+            validate_account_state_reference(cleaned)
+        return cleaned
 
     @field_validator("cron")
     @classmethod
@@ -242,6 +264,19 @@ class TaskUpdate(BaseModel):
         if value is None:
             return None
         return validate_task_name(value)
+
+    @field_validator("ai_prompt_base_file", "ai_prompt_criteria_file", mode="before")
+    @classmethod
+    def check_prompt_reference(cls, value):
+        """prompt 文件路径必须落在 prompts/ 内。
+
+        这些内容会被爬虫子进程读取并原样送进发往 OPENAI_BASE_URL 的请求，
+        任意路径等于"任意本地文件都能被外带"（安全审计 H2）。空值放行，
+        由后续业务校验（AI 模式必须给出判断标准）负责报错。
+        """
+        if value is None or not str(value).strip():
+            return value
+        return validate_prompt_reference(value)
 
     task_name: Optional[str] = None
     enabled: Optional[bool] = None
@@ -282,7 +317,12 @@ class TaskUpdate(BaseModel):
     @field_validator("account_state_file", mode="before")
     @classmethod
     def normalize_account_state_file(cls, value):
-        return clean_account_state_file(value)
+        cleaned = clean_account_state_file(value)
+        if cleaned:
+            # 该文件会被当作 Playwright 的 storage_state 读取，
+            # 任意路径等于"任意可读 JSON 都能当 cookie 用"。
+            validate_account_state_reference(cleaned)
+        return cleaned
 
     @field_validator("cron")
     @classmethod

@@ -539,6 +539,15 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         processed_item_count = 0
         stop_scraping = False
 
+        # 账号登录态文件必须落在受控目录内：它会被当作 Playwright 的
+        # storage_state 读取，任意路径等于"任意可读 JSON 都能被当成 cookie 使用"。
+        try:
+            state_file = str(safe_account_state_path(state_file))
+        except UnsafePathError as exc:
+            raise FileNotFoundError(
+                f"登录状态文件路径不合法，已拒绝使用: {state_file} ({exc})"
+            ) from exc
+
         if not os.path.exists(state_file):
             raise FileNotFoundError(f"登录状态文件不存在: {state_file}")
 

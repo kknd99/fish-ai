@@ -91,3 +91,137 @@ def resolve_task_image_dir(
     """
     safe_name = validate_task_name(task_name)
     return resolve_within(base_dir, f"{prefix}{safe_name}")
+
+
+#: prompt 文件所在目录（与 src/api/routes/prompts.py 的 _PROMPTS_DIR 保持一致）。
+PROMPTS_DIR = "prompts"
+
+#: 账号登录态目录的默认值（可被 ACCOUNT_STATE_DIR 覆盖）。
+DEFAULT_ACCOUNT_STATE_DIR = "state"
+
+#: 根目录下的单账号登录态文件。
+ROOT_STATE_FILE = "xianyu_state.json"
+
+
+def _normalize_relative_reference(value: object, *, field_label: str) -> str:
+    """把用户填写的相对路径规范化：统一分隔符、去掉前导 ``./``。"""
+    raw = str(value or "").strip()
+    if not raw:
+        raise UnsafePathError(f"{field_label}不能为空")
+    if os.path.isabs(raw) or Path(raw).is_absolute():
+        raise UnsafePathError(f"{field_label}必须使用相对路径，不能是绝对路径: {raw}")
+    if raw.startswith("\\\\") or (len(raw) > 1 and raw[1] == ":"):
+        raise UnsafePathError(f"{field_label}必须是相对路径: {raw}")
+
+    normalized = raw.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _resolve_under_base(
+    normalized: str,
+    base_dir: os.PathLike | str,
+    *,
+    field_label: str,
+    allow_bare_name: bool = False,
+) -> Path:
+    """把已规范化的相对路径解析到 ``base_dir`` 之下。
+
+    比单纯的 containment 检查更严一档，目的是让契约一眼可审：
+    - 任何 ``..`` 组件直接拒绝（不依赖 ``resolve()`` 的归一化语义）；
+    - 允许省略 ``base_dir`` 前缀（``foo.txt`` 与 ``prompts/foo.txt`` 等价）；
+    - 解析结果必须指向**具体文件**，不能退化回目录本身。
+    """
+    base = Path(base_dir)
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    if ".." in parts:
+        raise UnsafePathError(f"{field_label}不能包含 '..'：{normalized}")
+    if parts and parts[0] == base.name:
+        parts = parts[1:]
+    if not parts:
+        raise UnsafePathError(f"{field_label}必须指向具体文件，而不是目录：{normalized}")
+
+    resolved = resolve_within(base, *parts)
+    if resolved == base.resolve():
+        raise UnsafePathError(f"{field_label}必须指向具体文件：{normalized}")
+    return resolved
+
+
+def safe_prompt_path(
+    value: object,
+    *,
+    base_dir: os.PathLike | str = PROMPTS_DIR,
+) -> Path:
+    """把任务里的 prompt 文件引用解析为 ``prompts/`` 内的绝对路径。
+
+    ``ai_prompt_base_file`` / ``ai_prompt_criteria_file`` / ``ai_prompt_file`` 都是
+    用户可控字符串，而爬虫子进程会用 ``open()`` 直接读它们，再原样塞进发往
+    ``OPENAI_BASE_URL`` 的请求里。因此这里强制：只接受相对路径、不得含 ``..``，
+    且解析后必须落在 ``prompts/`` 之内——``/etc/passwd``、``../../.env`` 一律拒绝。
+
+    兼容两种写法：``base_prompt.txt`` 与 ``prompts/base_prompt.txt``。
+    """
+    normalized = _normalize_relative_reference(value, field_label="prompt 文件路径")
+    return _resolve_under_base(
+        normalized, base_dir, field_label="prompt 文件路径"
+    )
+
+
+def safe_account_state_path(
+    value: object,
+    *,
+    state_dir: os.PathLike | str = DEFAULT_ACCOUNT_STATE_DIR,
+    root_state_file: os.PathLike | str = ROOT_STATE_FILE,
+) -> Path:
+    """把 ``account_state_file`` 解析为受控路径。
+
+    允许两类取值：
+    1. 根目录的单账号文件 ``xianyu_state.json``；
+    2. ``ACCOUNT_STATE_DIR`` 内的文件（``acc_1.json`` 或 ``state/acc_1.json``）。
+
+    其余一律拒绝：这个值会被当作 Playwright 的 ``storage_state`` 读取，
+    任意路径等于"任意可读 JSON 都能当 cookie 用"。
+    """
+    normalized = _normalize_relative_reference(value, field_label="账号登录态文件")
+
+    root = Path(root_state_file)
+    if normalized in {root.name, root.as_posix()}:
+        return Path(root).resolve()
+
+    return _resolve_under_base(
+        normalized,
+        state_dir,
+        field_label="账号登录态文件",
+    )
+
+
+def validate_account_state_dir(value: object) -> str:
+    """校验 ``ACCOUNT_STATE_DIR`` 设置项。
+
+    该值可通过设置接口改写，若放任绝对路径就等于"把账号文件写到任意目录/从任意目录读"，
+    因此只接受项目内的相对目录。
+    """
+    normalized = _normalize_relative_reference(value, field_label="账号登录态目录")
+    normalized = normalized.rstrip("/")
+    if not normalized:
+        raise UnsafePathError("账号登录态目录不能为空")
+    if ".." in normalized.split("/"):
+        raise UnsafePathError("账号登录态目录不能包含 '..'")
+    return normalized
+
+
+def validate_prompt_reference(value: object) -> str:
+    """校验任务里的 prompt 文件引用，并返回**保持原有写法**的字符串。
+
+    只做校验、不改写存储格式：``prompts/foo.txt`` 与 ``foo.txt`` 都保留原样，
+    因为数据库、前端表单与 ``spider_v2`` 都依赖这个既有形态。
+    """
+    safe_prompt_path(value)
+    return str(value).strip()
+
+
+def validate_account_state_reference(value: object) -> str:
+    """校验任务的 ``account_state_file``，并返回保持原有写法的字符串。"""
+    safe_account_state_path(value)
+    return str(value).strip()
