@@ -33,6 +33,34 @@ command -v docker >/dev/null 2>&1 \
   || fail "未找到 docker 命令。请先安装 Docker（含 Compose v2 插件）。"
 docker compose version >/dev/null 2>&1 \
   || fail "docker compose（v2）不可用。注意需要的是 'docker compose' 而不是老版 'docker-compose'。"
+
+# 只查版本不够：`docker compose version` 不访问守护进程，权限不足时它照样成功，
+# 直到第 5 步构建才报 "permission denied while trying to connect to the docker API"。
+# 这里提前真正连一次守护进程，把权限问题在第 1 步就说清楚。
+if ! docker_info_output="$(docker info 2>&1)"; then
+  if printf '%s' "$docker_info_output" | grep -qi "permission denied"; then
+    cat >&2 <<'TEXT'
+
+错误：当前用户没有访问 Docker 守护进程的权限（/var/run/docker.sock 属于 docker 组）。
+
+两种解决办法：
+
+  1) 把当前用户加入 docker 组（推荐，一次搞定）：
+       sudo usermod -aG docker $USER
+       newgrp docker            # 让当前终端立即生效；或者直接注销重新登录
+     验证：docker info 或 docker ps 能正常输出即可
+
+  2) 本次直接用 sudo 跑本脚本：
+       sudo bash deploy-lan.sh
+     注意容器内以 root 运行，bind mount 出来的 data/ logs/ 等会属 root，
+     之后想在宿主机直接读写要先 sudo chown -R $USER:$USER data logs jsonl state
+
+TEXT
+    exit 1
+  fi
+  fail "无法连接 Docker 守护进程：$(printf '%s' "$docker_info_output" | head -2 | tr '\n' ' ')"
+fi
+
 [ -f "$COMPOSE_FILE" ] || fail "缺少 $COMPOSE_FILE，请在仓库根目录执行本脚本。"
 
 # ---------- 2. .env ----------
