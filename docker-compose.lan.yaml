@@ -37,19 +37,24 @@ services:
       TZ: Asia/Shanghai
     volumes:
       # 单文件挂载：宿主机上必须已存在，否则会被建成目录。
-      - ./.env:/app/.env
-      - ./config.json:/app/config.json
+      #
+      # 结尾的 :z 是给 SELinux 主机（Fedora / RHEL / Rocky / Alma 等）用的共享标签；
+      # 不启用 SELinux 的系统（Ubuntu / Debian / macOS）会忽略它，无副作用。
+      # 缺了它，在 SELinux enforcing 的机器上容器会读不到挂载进来的文件，
+      # 表现为 .env 配置为空、登录态文件报不存在。
+      - ./.env:/app/.env:z
+      - ./config.json:/app/config.json:z
       # 从 Web UI 导入的登录态写的是工作目录下的 xianyu_state.json（文件名在该接口里
       # 是写死的，不受 STATE_FILE 影响）。不挂出来的话它只存在于容器可写层，
       # 一旦 down / up --build 重建容器就没了，得重新从浏览器导出 cookie。
       # 首次部署前先在宿主机建好：echo '{}' > xianyu_state.json
-      - ./xianyu_state.json:/app/xianyu_state.json
+      - ./xianyu_state.json:/app/xianyu_state.json:z
       # 目录挂载：不存在时 Docker 会自动创建空目录。
-      - ./data:/app/data
-      - ./state:/app/state
-      - ./prompts:/app/prompts
-      - ./jsonl:/app/jsonl
-      - ./logs:/app/logs
-      - ./images:/app/images
-      - ./price_history:/app/price_history
+      - ./data:/app/data:z
+      - ./state:/app/state:z
+      - ./prompts:/app/prompts:z
+      - ./jsonl:/app/jsonl:z
+      - ./logs:/app/logs:z
+      - ./images:/app/images:z
+      - ./price_history:/app/price_history:z
     restart: unless-stopped

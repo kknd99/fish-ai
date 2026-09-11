@@ -45,6 +45,8 @@ rsync -av --progress \
 
 - 保留 `.git`（只有 4.9 MB），目标机上仍能看历史、切分支。
 - 排除 `.env`：密钥应该每台机器各自生成，不要跟着代码走。
+- 排除 `node_modules` 很关键：它有 144 MB，而排除运行数据后整份代码只有约 **8 MB**
+  （约 1057 个文件）。镜像在 Docker 内部自己 `npm ci`，不需要本地依赖。
 - 想连任务与历史结果一起搬，就去掉 `logs/*`、`jsonl/*`、`images/*` 的排除项，
   并额外带上 `data/`（SQLite 库在里面）。
 - **不要**搬 `state/`：里面的 cookie 已经失效，搬过去只会误导。
@@ -128,6 +130,12 @@ compose 的端口映射（`docker-compose.lan.yaml` 已经是 `8000:8000`）和*
 - **macOS**：系统设置 → 网络 → 防火墙，允许 Docker 接受传入连接（Docker Desktop 首次
   发布端口时会弹窗询问）。
 
+> **Linux 上注意：Docker 发布端口是直接写 iptables 的，会绕过 ufw。**
+> 所以 `ufw deny 8000` **拦不住**已经映射出去的容器端口，别把它当安全边界。
+> 想限制来源，正确做法是改 compose 的端口映射绑定到具体网卡或地址，例如
+> `"192.168.1.10:8000:8000"`（只允许该网段访问），需要精细规则则写
+> `iptables -I DOCKER-USER ...`。反过来，`ufw allow` 之类的放行规则是有效的。
+
 在**另一台**电脑上验证：
 
 ```bash
@@ -164,7 +172,29 @@ docker compose -f docker-compose.lan.yaml up -d --build
 用 `docker-compose.dev.yaml` 的话它挂了 `./src`，后端改动 `restart` 即可，但前端产物在
 镜像里，改 Vue 仍需 `--build`。
 
-## 8. 常见坑
+## 8. Linux 目标机专属注意事项
+
+- **SELinux**：Fedora / RHEL / Rocky / Alma 默认 enforcing。`docker-compose.lan.yaml`
+  里的挂载都带了 `:z` 共享标签，正常可用；若你另外加挂载点却没带 `:z`，容器会读不到
+  文件，表现为「`.env` 明明填了却读不到」「登录态文件不存在」。排查：
+  `getenforce`、`sudo ausearch -m avc -ts recent`。
+- **时钟必须先同步**：容器用的是宿主机内核时钟。NAS / 树莓派这类设备如果时间漂移，
+  会直接影响两个功能：cron 定时任务的触发时刻，以及**飞书签名校验**——飞书要求请求
+  时间戳与服务器时间相差不超过 1 小时，偏差过大推送会被拒（报 `sign match fail`）。
+  先确认 `timedatectl status` 里 NTP 已同步。
+- **浏览器必须无头**：容器里没有 X display，`RUN_HEADLESS` 保持默认 `true`。
+  别在容器里设 `RUN_HEADLESS=false`，Playwright 会因无法启动有头浏览器而失败；
+  需要看浏览器窗口时请在本机（非容器）跑。
+- **端口占用**：`ss -ltnp | grep :8000`，被占就改 compose 的映射与 `.env` 里的
+  `SERVER_PORT`。
+- **docker 权限**：把用户加进 docker 组（`sudo usermod -aG docker $USER`，重新登录生效），
+  否则每条命令都要 sudo。
+- **架构差异不用管**：源机器是 arm64（Apple Silicon），目标机通常是 x86_64 —— 因为镜像是
+  **在目标机上构建**的，天然匹配本机架构，不需要 buildx/QEMU 交叉构建。
+- **挂载文件属 root**：镜像内以 root 运行，bind mount 落盘的 `data/`、`logs/` 等属 root。
+  想在宿主机直接改，`sudo chown -R $USER:$USER data logs jsonl state price_history`。
+
+## 9. 常见坑
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
@@ -173,10 +203,13 @@ docker compose -f docker-compose.lan.yaml up -d --build
 | 容器重建后登录态、通知设置全没了 | `.env` / `xianyu_state.json` 没挂卷 | 用 `docker-compose.lan.yaml`，它两个都挂了 |
 | 别的电脑打不开页面 | 防火墙没放行，或 compose 端口还绑在 127.0.0.1 | 见第 5 节 |
 | `.env` 填了但读不到（尤其 Windows） | 文件带 BOM | 存成 UTF-8 无 BOM |
+| SELinux 机器上容器读不到挂载文件 | 挂载点缺 `:z` 标签 | 挂载加 `:z`（本仓库 compose 已带）；`getenforce` 查看 |
+| 飞书推送报 `sign match fail` | 宿主机时钟漂移超过 1 小时 | `timedatectl status` 确认 NTP 已同步 |
+| `ufw deny 8000` 之后外部仍能访问 | Docker 直接写 iptables，绕过 ufw | 改绑具体 IP，或用 `DOCKER-USER` 链 |
 | 提示"登录态失效"、抓到反爬页 | 登录态过期，或目标机网络 IP 被风控 | 重新导出登录态；必要时换网络 |
 | 日志/数据文件在 Linux 上属 root，读不了 | 镜像内以 root 运行，bind mount 落盘即 root 所有 | `sudo chown -R $USER:$USER data logs jsonl state` |
 
-## 9. 安全检查清单
+## 10. 安全检查清单
 
 - [ ] `WEB_PASSWORD` 已改成非默认值（默认 `admin/admin123` 是公开文档里的值）
 - [ ] 只需要本机访问就别开 `8000:8000`，保持绑 `127.0.0.1`
