@@ -1,9 +1,13 @@
+import os
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api import dependencies as deps
 from src.api.routes import settings
 from src.infrastructure.config.env_manager import env_manager
+from src.services.notification_config_service import load_notification_settings
 
 
 _SETTINGS_ENV_KEYS = [
@@ -27,6 +31,8 @@ _SETTINGS_ENV_KEYS = [
     "GOTIFY_TOKEN",
     "BARK_URL",
     "WX_BOT_URL",
+    "FEISHU_BOT_URL",
+    "FEISHU_BOT_SECRET",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
     "TELEGRAM_API_BASE_URL",
@@ -55,6 +61,24 @@ def _build_settings_client() -> TestClient:
 def _clear_settings_env(monkeypatch) -> None:
     for key in _SETTINGS_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_env():
+    """隔离测试间经由 .env 回写造成的进程环境泄漏。
+
+    ``settings._reload_env()`` 内部使用 ``load_dotenv(override=True)``，会把本次
+    写入临时 .env 的值直接注入 ``os.environ``；``monkeypatch`` 只还原自己改过的
+    键，因此这些值会残留到后续用例中，导致"先填 URL 再校验"之类的用例被前一个
+    用例的环境变量蒙混通过。这里整体快照并还原 ``os.environ``，新增配置字段无需
+    再维护清理清单。
+    """
+    snapshot = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(snapshot)
 
 
 def test_rotation_settings_include_account_rotation_fields(tmp_path, monkeypatch):
@@ -118,6 +142,8 @@ def test_notification_settings_redact_sensitive_values_and_expose_flags(tmp_path
                 "GOTIFY_TOKEN=secret-token",
                 "BARK_URL=https://api.day.app/private-key/",
                 "WX_BOT_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=secret",
+                "FEISHU_BOT_URL=https://open.feishu.cn/open-apis/bot/v2/hook/secret-token",
+                "FEISHU_BOT_SECRET=feishu-signing-secret",
                 "TELEGRAM_BOT_TOKEN=telegram-secret",
                 "TELEGRAM_CHAT_ID=123456",
                 "TELEGRAM_API_BASE_URL=https://tg.example.com/proxy",
@@ -141,12 +167,16 @@ def test_notification_settings_redact_sensitive_values_and_expose_flags(tmp_path
     assert payload["TELEGRAM_API_BASE_URL"] == "https://tg.example.com/proxy"
     assert payload["BARK_URL"] == ""
     assert payload["WX_BOT_URL"] == ""
+    assert payload["FEISHU_BOT_URL"] == ""
+    assert payload["FEISHU_BOT_SECRET"] == ""
     assert payload["GOTIFY_TOKEN"] == ""
     assert payload["TELEGRAM_BOT_TOKEN"] == ""
     assert payload["WEBHOOK_URL"] == ""
     assert payload["WEBHOOK_HEADERS"] == ""
     assert payload["BARK_URL_SET"] is True
     assert payload["WX_BOT_URL_SET"] is True
+    assert payload["FEISHU_BOT_URL_SET"] is True
+    assert payload["FEISHU_BOT_SECRET_SET"] is True
     assert payload["GOTIFY_TOKEN_SET"] is True
     assert payload["TELEGRAM_BOT_TOKEN_SET"] is True
     assert payload["WEBHOOK_URL_SET"] is True
@@ -493,3 +523,94 @@ def test_ai_test_endpoint_never_reuses_stored_key_for_a_new_base_url(tmp_path, m
         json={"OPENAI_BASE_URL": "https://real.example/v1", "OPENAI_MODEL_NAME": "real-model"},
     )
     assert built_clients[-1]["api_key"] == "sk-stored-secret"
+
+
+# ------------------------------------------------------------ 飞书机器人
+
+def test_feishu_settings_round_trip_and_channel_listing(tmp_path, monkeypatch):
+    """填写飞书机器人后：写入 .env、出现在已配置渠道里、密钥字段不回显。"""
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    client = _build_settings_client()
+    response = client.put(
+        "/api/settings/notifications",
+        json={
+            "FEISHU_BOT_URL": "https://open.feishu.cn/open-apis/bot/v2/hook/token-abc",
+            "FEISHU_BOT_SECRET": "signing-secret",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "feishu" in response.json()["configured_channels"]
+
+    written = env_file.read_text(encoding="utf-8")
+    assert "FEISHU_BOT_URL=https://open.feishu.cn/open-apis/bot/v2/hook/token-abc" in written
+    assert "FEISHU_BOT_SECRET=signing-secret" in written
+
+    payload = client.get("/api/settings/notifications").json()
+    assert payload["FEISHU_BOT_URL"] == ""
+    assert payload["FEISHU_BOT_URL_SET"] is True
+    assert payload["FEISHU_BOT_SECRET_SET"] is True
+    assert "feishu" in payload["CONFIGURED_CHANNELS"]
+
+
+def test_feishu_url_must_be_valid_http_url(tmp_path, monkeypatch):
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    response = _build_settings_client().put(
+        "/api/settings/notifications",
+        json={"FEISHU_BOT_URL": "open.feishu.cn/hook/token"},
+    )
+
+    assert response.status_code == 422
+    assert "FEISHU_BOT_URL" in response.text
+
+
+def test_feishu_secret_requires_url(tmp_path, monkeypatch):
+    """只填签名密钥而不填地址没有意义，应当直接拒绝。"""
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    response = _build_settings_client().put(
+        "/api/settings/notifications",
+        json={"FEISHU_BOT_SECRET": "signing-secret"},
+    )
+
+    assert response.status_code == 422
+    assert "FEISHU_BOT_URL" in response.text
+
+
+def test_feishu_channel_test_merges_stored_secret(tmp_path, monkeypatch):
+    """渠道测试只应合并该渠道自己的字段，且必须带上已存的签名密钥。"""
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "FEISHU_BOT_URL=https://open.feishu.cn/open-apis/bot/v2/hook/stored-token",
+                "FEISHU_BOT_SECRET=stored-secret",
+                "WX_BOT_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=other",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    from src.services.notification_config_service import prepare_notification_test_settings
+
+    merged = prepare_notification_test_settings(
+        {}, load_notification_settings(), channel="feishu"
+    )
+
+    assert merged.feishu_bot_url == "https://open.feishu.cn/open-apis/bot/v2/hook/stored-token"
+    assert merged.feishu_bot_secret == "stored-secret"
+    # 其它渠道的配置不应被带进来
+    assert merged.wx_bot_url is None
