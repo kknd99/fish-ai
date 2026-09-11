@@ -13,7 +13,7 @@ import pytest
 
 from src.services.trade.adapters import AdapterResult, NotifyLinkAdapter, build_adapter
 from src.services.trade.audit import TradeAuditStore
-from src.services.trade.models import TradeIntent, TradeOutcome
+from src.services.trade.models import PRICE_SOURCE_DETAIL, TradeIntent, TradeOutcome
 from src.services.trade.risk_gate import TradeLimits, TradeRiskGate
 from src.services.trade.service import TradeService
 
@@ -55,6 +55,7 @@ def make_intent(**overrides):
         "link": "https://www.goofish.com/item?id=item-1&spm=abc",
         "seller": "卖家A",
         "decision_source": "ai",
+        "price_source": PRICE_SOURCE_DETAIL,
         "evidence": {"is_recommended": True},
     }
     payload.update(overrides)

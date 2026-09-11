@@ -190,7 +190,8 @@ class TaskCreate(BaseModel):
     keyword: str
     description: Optional[str] = ""
     analyze_images: bool = True
-    max_pages: int = 3
+    # 上限与 scraper.MAX_TASK_PAGES 保持一致：该值决定抓取量与风控暴露面
+    max_pages: int = Field(default=3, ge=1, le=20)
     personal_only: bool = True
     min_price: Optional[str] = None
     max_price: Optional[str] = None
@@ -283,7 +284,7 @@ class TaskUpdate(BaseModel):
     keyword: Optional[str] = None
     description: Optional[str] = None
     analyze_images: Optional[bool] = None
-    max_pages: Optional[int] = None
+    max_pages: Optional[int] = Field(default=None, ge=1, le=20)
     personal_only: Optional[bool] = None
     min_price: Optional[str] = None
     max_price: Optional[str] = None
@@ -357,7 +358,7 @@ class TaskGenerateRequest(BaseModel):
     personal_only: bool = True
     min_price: Optional[str] = None
     max_price: Optional[str] = None
-    max_pages: int = 3
+    max_pages: int = Field(default=3, ge=1, le=20)
     cron: Optional[str] = None
     account_state_file: Optional[str] = None
     account_strategy: Literal["auto", "fixed", "rotate"] = "auto"

@@ -14,6 +14,11 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 
+#: 可信的价格来源标识：只有取自**详情接口解析结果**的价格才允许用于交易判定。
+#: 搜索列表页的摘要价可能被"低价引流"利用（点进去改价），因此必须区分来源。
+PRICE_SOURCE_DETAIL = "detail"
+
+
 class TradeOutcome(str, Enum):
     """一次交易动作的最终结果。"""
 
@@ -58,6 +63,11 @@ class TradeIntent:
     link: str
     seller: Optional[str] = None
     decision_source: str = "unknown"          # "ai" / "keyword"
+    #: 价格来源，取值见 ``PRICE_SOURCE_DETAIL``；闸门只接受 detail（fail-closed）
+    price_source: str = "unknown"
+    #: 任务自身配置的价格区间，用于进闸门前的二次夹取
+    task_min_price: Optional[float] = None
+    task_max_price: Optional[float] = None
     evidence: Mapping[str, Any] = field(default_factory=dict)
     idempotency_key: str = ""                 # 留空则自动生成
 

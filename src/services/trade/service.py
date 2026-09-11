@@ -39,8 +39,12 @@ class TradeService:
         *,
         db_path: Optional[str] = None,
         notification_service=None,
+        ai_settings=None,
     ) -> "TradeService":
         """按当前配置装配一套交易服务。"""
+        # 现取配置：reload_settings() 会重新绑定模块级实例，导入时的引用会过期
+        from src.infrastructure.config.settings import ai_settings as current_ai_settings
+
         resolved = settings or trade_settings
         adapter = build_adapter(
             getattr(resolved, "adapter", "dry_run"),
@@ -48,7 +52,12 @@ class TradeService:
         )
         return cls(
             audit=TradeAuditStore(db_path=db_path),
-            gate=TradeRiskGate(TradeLimits.from_settings(resolved)),
+            gate=TradeRiskGate(
+                TradeLimits.from_settings(
+                    resolved,
+                    ai_settings if ai_settings is not None else current_ai_settings,
+                )
+            ),
             adapter=adapter,
         )
 

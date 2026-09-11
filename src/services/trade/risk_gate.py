@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-from src.services.trade.models import GateVerdict, TradeIntent
+from src.services.trade.models import PRICE_SOURCE_DETAIL, GateVerdict, TradeIntent
 
 
 @dataclass(frozen=True)
@@ -31,10 +31,17 @@ class TradeLimits:
     kill_switch_file: str = "TRADE_KILL_SWITCH"
     allowed_sellers: tuple[str, ...] = ()
     min_value_score: float = 0.0
+    #: SKIP_AI_ANALYSIS=true 时，所有商品都会被判为"推荐"
+    #: （见 item_analysis_dispatcher），必须与交易互斥。
+    ai_analysis_disabled: bool = False
 
     @classmethod
-    def from_settings(cls, trade_settings: Any) -> "TradeLimits":
-        """由 :class:`~src.infrastructure.config.settings.TradeSettings` 构造。"""
+    def from_settings(cls, trade_settings: Any, ai_settings: Any = None) -> "TradeLimits":
+        """由 :class:`~src.infrastructure.config.settings.TradeSettings` 构造。
+
+        ``ai_settings`` 用于读取 ``SKIP_AI_ANALYSIS``：开启它会让
+        ``is_recommended`` 恒为真，与"自动花钱"绝对不能共存。
+        """
         raw_sellers = getattr(trade_settings, "allowed_sellers", None) or ""
         sellers = tuple(
             part.strip() for part in str(raw_sellers).split(",") if part.strip()
@@ -51,6 +58,7 @@ class TradeLimits:
             ),
             allowed_sellers=sellers,
             min_value_score=float(getattr(trade_settings, "min_value_score", 0.0) or 0.0),
+            ai_analysis_disabled=bool(getattr(ai_settings, "skip_analysis", False)),
         )
 
     def as_audit_dict(self) -> dict:
@@ -62,6 +70,7 @@ class TradeLimits:
             "max_orders_per_day": self.max_orders_per_day,
             "allowed_sellers": list(self.allowed_sellers),
             "min_value_score": self.min_value_score,
+            "ai_analysis_disabled": self.ai_analysis_disabled,
         }
 
 
@@ -166,6 +175,57 @@ class TradeRiskGate:
         if (intent.seller or "").strip() not in allow:
             reasons.append(f"卖家 '{intent.seller}' 不在白名单内")
 
+    def _check_price_provenance(
+        self,
+        intent: TradeIntent,
+        reasons: list[str],
+        checks: dict,
+    ) -> None:
+        """价格必须来自详情接口解析结果。
+
+        搜索列表页的摘要价可能被"低价引流"利用——列表显示低价、点进去改价，
+        闸门的所有金额上限都可能被绕过。因此这里 fail-closed：来源不明就不放行。
+        """
+        checks["price_source"] = intent.price_source
+        if intent.price_source != PRICE_SOURCE_DETAIL:
+            reasons.append(
+                f"价格来源不可信（{intent.price_source or 'unknown'}）："
+                f"必须使用详情接口解析出的价格（{PRICE_SOURCE_DETAIL}）"
+            )
+
+    def _check_task_price_bounds(
+        self,
+        intent: TradeIntent,
+        reasons: list[str],
+        checks: dict,
+    ) -> None:
+        """用任务自身配置的价格区间再夹一次。"""
+        checks["task_min_price"] = intent.task_min_price
+        checks["task_max_price"] = intent.task_max_price
+        try:
+            price = float(intent.price)
+        except (TypeError, ValueError):
+            return  # 价格本身无法解析时由 _check_price 负责报错
+
+        if intent.task_max_price is not None and price > float(intent.task_max_price):
+            reasons.append(
+                f"价格 {price} 超出任务上限 {intent.task_max_price}（可能被改价）"
+            )
+        if intent.task_min_price is not None and price < float(intent.task_min_price):
+            reasons.append(
+                f"价格 {price} 低于任务下限 {intent.task_min_price}"
+                "（疑似低价引流或价格解析不一致）"
+            )
+
+    def _check_ai_analysis_enabled(self, reasons: list[str], checks: dict) -> None:
+        """``SKIP_AI_ANALYSIS=true`` 与交易互斥。"""
+        checks["ai_analysis_disabled"] = self.limits.ai_analysis_disabled
+        if self.limits.ai_analysis_disabled:
+            reasons.append(
+                "已设置 SKIP_AI_ANALYSIS=true：此时所有商品都会被判为推荐，"
+                "禁止在开启交易的情况下使用该开关"
+            )
+
     def _check_value_score(
         self,
         intent: TradeIntent,
@@ -201,7 +261,10 @@ class TradeRiskGate:
         try:
             self._check_enabled(reasons, checks)
             self._check_kill_switch(reasons, checks)
+            self._check_ai_analysis_enabled(reasons, checks)
+            self._check_price_provenance(intent, reasons, checks)
             self._check_price(intent, reasons, checks)
+            self._check_task_price_bounds(intent, reasons, checks)
             self._check_daily_budget(intent, spent_today, reasons, checks)
             self._check_order_count(orders_today, reasons, checks)
             self._check_duplicate(intent, duplicate, reasons, checks)

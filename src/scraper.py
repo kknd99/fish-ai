@@ -234,10 +234,23 @@ def _get_rotation_settings(task_config: dict) -> dict:
     }
 
 
+#: AI 分析并发上限。该值可由任务配置给出（历史上没有上限），
+#: 它直接决定 LLM 并发与花费，因此在这里封顶（安全审计：可经 API 设成任意大）。
+MAX_AI_ANALYSIS_CONCURRENCY = 8
+
+#: 单任务最多翻页数。上限用于约束抓取量与风控暴露面。
+MAX_TASK_PAGES = 20
+
+
 def _get_ai_analysis_concurrency(task_config: dict) -> int:
     configured = task_config.get("ai_analysis_concurrency")
     default = _as_int(os.getenv("AI_ANALYSIS_CONCURRENCY"), 2)
-    return max(1, _as_int(configured, default))
+    return min(MAX_AI_ANALYSIS_CONCURRENCY, max(1, _as_int(configured, default)))
+
+
+def _get_max_pages(task_config: dict) -> int:
+    """取单任务翻页数并封顶（历史数据里可能存在超大值）。"""
+    return min(MAX_TASK_PAGES, max(1, _as_int(task_config.get("max_pages"), 1)))
 
 
 def _get_seller_profile_cache_ttl(task_config: dict) -> int:
@@ -448,7 +461,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     根据单个任务配置，异步爬取闲鱼商品数据，并对每个新发现的商品进行实时的、独立的AI分析和通知。
     """
     keyword = task_config["keyword"]
-    max_pages = task_config.get("max_pages", 1)
+    max_pages = _get_max_pages(task_config)
     personal_only = task_config.get("personal_only", False)
     min_price = task_config.get("min_price")
     max_price = task_config.get("max_price")
