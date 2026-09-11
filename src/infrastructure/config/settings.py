@@ -95,6 +95,30 @@ class ScraperSettings(_EnvSettings):
     state_file: str = _env_field("xianyu_state.json", "STATE_FILE")
 
 
+class TradeSettings(_EnvSettings):
+    """交易（自动下单）相关配置。
+
+    设计原则：默认**关闭**，开启后默认 **dry-run**（只写审计、不提交订单）。
+    所有金额上限都必须显式配置；为 0 表示"未设置该上限"，此时闸门会拒绝放行
+    而不是无限额放行（fail-closed）。
+    """
+    enabled: bool = _env_field(False, "TRADE_ENABLED")
+    dry_run: bool = _env_field(True, "TRADE_DRY_RUN")
+    adapter: str = _env_field("notify_link", "TRADE_ADAPTER")
+    #: 单件价格上限（元）。0 = 未设置 → 拒绝放行。
+    max_unit_price: float = _env_field(0.0, "TRADE_MAX_UNIT_PRICE")
+    #: 每日总预算上限（元）。0 = 未设置 → 拒绝放行。
+    daily_budget: float = _env_field(0.0, "TRADE_DAILY_BUDGET")
+    #: 每日订单数上限。0 = 禁止下单。
+    max_orders_per_day: int = _env_field(0, "TRADE_MAX_ORDERS_PER_DAY", ge=0)
+    #: 存在该文件时立即停止一切交易动作（人工急停开关）。
+    kill_switch_file: str = _env_field("TRADE_KILL_SWITCH", "TRADE_KILL_SWITCH_FILE")
+    #: 卖家白名单，逗号分隔；为空表示不限制。
+    allowed_sellers: Optional[str] = _env_field(None, "TRADE_ALLOWED_SELLERS")
+    #: 要求 AI 给出的价值评分下限（0 = 不要求）。
+    min_value_score: float = _env_field(0.0, "TRADE_MIN_VALUE_SCORE")
+
+
 class AppSettings(_EnvSettings):
     """应用主配置"""
     server_port: int = _env_field(8000, "SERVER_PORT")
@@ -126,7 +150,7 @@ def get_settings() -> AppSettings:
 
 def reload_settings() -> None:
     """重新加载全局配置实例"""
-    global _settings_instance, settings, ai_settings, notification_settings, scraper_settings
+    global _settings_instance, settings, ai_settings, notification_settings, scraper_settings, trade_settings
     from dotenv import load_dotenv
     from src.infrastructure.config.env_manager import env_manager
 
@@ -136,6 +160,7 @@ def reload_settings() -> None:
     ai_settings = AISettings()
     notification_settings = NotificationSettings()
     scraper_settings = ScraperSettings()
+    trade_settings = TradeSettings()
 
 
 # 导出便捷访问的配置实例
@@ -143,3 +168,4 @@ settings = get_settings()
 ai_settings = AISettings()
 notification_settings = NotificationSettings()
 scraper_settings = ScraperSettings()
+trade_settings = TradeSettings()

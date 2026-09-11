@@ -97,6 +97,40 @@ SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS trade_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        task_name TEXT NOT NULL,
+        item_id TEXT,
+        title TEXT,
+        link TEXT,
+        seller TEXT,
+        price REAL,
+        adapter TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        allowed INTEGER NOT NULL,
+        reasons_json TEXT NOT NULL,
+        checks_json TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        external_ref TEXT,
+        detail TEXT,
+        duration_ms INTEGER
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_trade_attempts_created
+    ON trade_attempts(created_at DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_trade_attempts_idempotency
+    ON trade_attempts(idempotency_key)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_trade_attempts_outcome
+    ON trade_attempts(outcome, created_at DESC)
+    """,
     "CREATE INDEX IF NOT EXISTS idx_tasks_name ON tasks(task_name)",
     """
     CREATE INDEX IF NOT EXISTS idx_results_filename_crawl
