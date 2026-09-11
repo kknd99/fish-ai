@@ -1,0 +1,33 @@
+{
+  "services": {
+    "app": {
+      "build": ".",
+      "image": "ai-goofish-monitor:lan",
+      "container_name": "ai-goofish-monitor-app",
+      "init": true,
+      "ports": [
+        "8000:8000"
+      ],
+      "env_file": [
+        ".env"
+      ],
+      "environment": {
+        "APP_DATABASE_FILE": "/app/data/app.sqlite3",
+        "TZ": "Asia/Shanghai"
+      },
+      "volumes": [
+        "./.env:/app/.env:z",
+        "./config.json:/app/config.json:z",
+        "./xianyu_state.json:/app/xianyu_state.json:z",
+        "./data:/app/data:z",
+        "./state:/app/state:z",
+        "./prompts:/app/prompts:z",
+        "./jsonl:/app/jsonl:z",
+        "./logs:/app/logs:z",
+        "./images:/app/images:z",
+        "./price_history:/app/price_history:z"
+      ],
+      "restart": "unless-stopped"
+    }
+  }
+}
