@@ -65,8 +65,52 @@ for key in OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL_NAME WEB_PASSWORD; do
 done
 [ -z "$missing" ] || fail ".env 里这些必填项还是空的：$missing"
 
-if [ "$(get_env WEB_PASSWORD)" = "admin123" ]; then
+# 重复项检测：dotenv 与本脚本都取**最后一处**，所以"在上面粘了一行新值"不会生效，
+# 用编辑器打开时光标默认在第 1 行，直接粘贴就会插到开头，非常容易踩。
+dups=""
+for key in OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL_NAME WEB_PASSWORD WEB_USERNAME; do
+  count="$(grep -c "^$key=" .env || true)"
+  if [ "$count" -gt 1 ]; then
+    line_numbers="$(grep -n "^$key=" .env | cut -d: -f1 | tr '\n' ' ')"
+    dups="$dups  $key 出现 ${count} 次（行号：$line_numbers）\n"
+  fi
+done
+if [ -n "$dups" ]; then
+  {
+    printf '\n错误：.env 里有重复的配置项，每一项只能保留一行。\n\n'
+    printf '%b' "$dups"
+    cat <<'TEXT'
+
+为什么会这样：用 nano/vim 打开文件时光标停在**第 1 行**，直接粘贴会把新内容
+插到文件开头，原来那行并没有被替换；而读取配置时取的是**最后一处**，所以
+"我明明改了却没生效"。
+
+最稳的清理办法（先删掉所有同名行，再追加唯一的一行）：
+
+  # Linux
+  sed -i '/^WEB_PASSWORD=/d' .env
+  printf 'WEB_PASSWORD=%s\n' '你的新密码' >> .env
+  grep -n WEB_PASSWORD .env      # 确认只剩一行
+
+  # macOS 的 sed 需要带一个空备份后缀
+  sed -i '' '/^WEB_PASSWORD=/d' .env
+
+如果还想从干净状态重来（会清掉已填的其它项）：
+
+  cp .env.example .env && chmod 600 .env && nano .env
+
+密码里不要用单引号，避免上面的 shell 引号冲突。
+TEXT
+  } >&2
+  exit 1
+fi
+
+web_password="$(get_env WEB_PASSWORD)"
+if [ "$web_password" = "admin123" ]; then
   fail "WEB_PASSWORD 还是公开文档里的默认值 admin123。端口一旦绑到 0.0.0.0，管理接口就等于对整个局域网敞开，必须改成强口令。"
+fi
+if [ "${#web_password}" -lt 8 ]; then
+  fail "WEB_PASSWORD 太短（当前 ${#web_password} 位）。建议至少 12 位，混合大小写、数字与符号。"
 fi
 
 host_port="$(get_env APP_PORT)"
