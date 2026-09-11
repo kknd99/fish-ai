@@ -64,6 +64,9 @@ from src.services.price_history_service import (
     record_market_snapshots,
 )
 from src.services.result_storage_service import load_processed_link_keys
+from src.services.seller_profile_cache import (
+    DEFAULT_MAX_ENTRIES as DEFAULT_SELLER_PROFILE_CACHE_ENTRIES,
+)
 from src.services.seller_profile_cache import SellerProfileCache
 from src.services.search_pagination import (
     advance_search_page,
@@ -249,6 +252,11 @@ MAX_AI_ANALYSIS_CONCURRENCY = 8
 #: 单任务最多翻页数。上限用于约束抓取量与风控暴露面。
 MAX_TASK_PAGES = 20
 
+#: 卖家主页/评价列表的最大滚动次数。
+#: 原实现只靠 8 秒空闲超时兜底：页面若持续分页就会一直滚动，
+#: 同时把抓到的条目全堆在内存里（all_items / all_ratings）。
+MAX_SELLER_PROFILE_SCROLLS = 30
+
 
 def _get_ai_analysis_concurrency(task_config: dict) -> int:
     configured = task_config.get("ai_analysis_concurrency")
@@ -259,6 +267,16 @@ def _get_ai_analysis_concurrency(task_config: dict) -> int:
 def _get_max_pages(task_config: dict) -> int:
     """取单任务翻页数并封顶（历史数据里可能存在超大值）。"""
     return min(MAX_TASK_PAGES, max(1, _as_int(task_config.get("max_pages"), 1)))
+
+
+MAX_SELLER_PROFILE_CACHE_ENTRIES = 2000
+
+
+def _get_seller_profile_cache_max_entries(task_config: dict) -> int:
+    """卖家资料缓存容量上限（封顶，避免长时间运行堆积深拷贝）。"""
+    configured = task_config.get("seller_profile_cache_max_entries")
+    default = _as_int(os.getenv("SELLER_PROFILE_CACHE_MAX_ENTRIES"), DEFAULT_SELLER_PROFILE_CACHE_ENTRIES)
+    return min(MAX_SELLER_PROFILE_CACHE_ENTRIES, max(1, _as_int(configured, default)))
 
 
 def _get_seller_profile_cache_ttl(task_config: dict) -> int:
@@ -423,7 +441,14 @@ async def scrape_user_profile(context, user_id: str) -> dict:
         # --- 任务2: 滚动加载所有商品 (默认页面) ---
         print("      [采集阶段] 开始采集该用户的商品列表...")
         await random_sleep(2, 4)  # 等待第一页商品API完成
+        scroll_rounds = 0
         while not stop_item_scrolling.is_set():
+            if scroll_rounds >= MAX_SELLER_PROFILE_SCROLLS:
+                print(
+                    f"      [滚动上限] 商品列表已滚动 {MAX_SELLER_PROFILE_SCROLLS} 次，停止加载。"
+                )
+                break
+            scroll_rounds += 1
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             try:
                 await asyncio.wait_for(stop_item_scrolling.wait(), timeout=8)
@@ -439,7 +464,14 @@ async def scrape_user_profile(context, user_id: str) -> dict:
             await rating_tab_locator.click()
             await random_sleep(3, 5)  # 等待第一页评价API完成
 
+            rating_scroll_rounds = 0
             while not stop_rating_scrolling.is_set():
+                if rating_scroll_rounds >= MAX_SELLER_PROFILE_SCROLLS:
+                    print(
+                        f"      [滚动上限] 评价列表已滚动 {MAX_SELLER_PROFILE_SCROLLS} 次，停止加载。"
+                    )
+                    break
+                rating_scroll_rounds += 1
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 try:
                     await asyncio.wait_for(stop_rating_scrolling.wait(), timeout=8)
@@ -622,7 +654,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 storage_state=storage_state_arg, **context_kwargs
             )
             seller_profile_cache = SellerProfileCache(
-                ttl_seconds=_get_seller_profile_cache_ttl(task_config)
+                ttl_seconds=_get_seller_profile_cache_ttl(task_config),
+                max_entries=_get_seller_profile_cache_max_entries(task_config),
             )
             analysis_dispatcher = ItemAnalysisDispatcher(
                 concurrency=_get_ai_analysis_concurrency(task_config),
