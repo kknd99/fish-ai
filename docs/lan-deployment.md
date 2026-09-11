@@ -290,6 +290,32 @@ docker compose -f docker-compose.lan.yaml up -d --build
 | 提示"登录态失效"、抓到反爬页 | 登录态过期，或目标机网络 IP 被风控 | 重新导出登录态；必要时换网络 |
 | 日志/数据文件在 Linux 上属 root，读不了 | 镜像内以 root 运行，bind mount 落盘即 root 所有 | `sudo chown -R $USER:$USER data logs jsonl state` |
 
+## 10. 本地校验编排文件（可选）
+
+改动 `docker-compose.lan.yaml` 后，不用等到 NAS 上构建才发现写错。装一个
+Compose 单文件二进制即可在本地做完整语义校验（`config` 子命令不访问守护进程，
+所以**不需要装 Docker、不需要守护进程**）：
+
+```bash
+mkdir -p ~/.local/bin && cd ~/.local/bin
+curl -fsSL -o docker-compose \
+  https://github.com/docker/compose/releases/latest/download/docker-compose-darwin-aarch64
+chmod +x docker-compose
+
+docker-compose -f docker-compose.lan.yaml config          # 解析 + 打印最终配置
+docker-compose -f docker-compose.lan.json config          # JSON 版同样可用
+APP_PORT=9000 docker-compose -f docker-compose.lan.yaml config | grep published
+```
+
+仓库里有一组对应的回归测试，会调用这个二进制（找不到就自动跳过）：
+
+```bash
+DOCKER_COMPOSE_BIN=~/.local/bin/docker-compose pytest tests/integration/test_compose_files.py
+```
+
+它覆盖：两份编排文件解析结果必须一致、`APP_PORT` 只改宿主端口、期望的挂载点齐全、
+挂载带 `:z` 标签、以及不写冗余的 `init: true`。
+
 ## 10. 安全检查清单
 
 - [ ] `WEB_PASSWORD` 已改成非默认值（默认 `admin/admin123` 是公开文档里的值）
