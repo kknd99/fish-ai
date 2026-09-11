@@ -4,6 +4,7 @@
 from src.infrastructure.config.settings import NotificationSettings
 
 from .bark_client import BarkClient
+from .feishu_bot_client import FeishuBotClient
 from .gotify_client import GotifyClient
 from .ntfy_client import NtfyClient
 from .telegram_client import TelegramClient
@@ -22,6 +23,11 @@ def build_notification_clients(settings: NotificationSettings):
             pcurl_to_mobile=pcurl_to_mobile,
         ),
         WeComBotClient(settings.wx_bot_url, pcurl_to_mobile=pcurl_to_mobile),
+        FeishuBotClient(
+            settings.feishu_bot_url,
+            settings.feishu_bot_secret,
+            pcurl_to_mobile=pcurl_to_mobile,
+        ),
         TelegramClient(
             settings.telegram_bot_token,
             settings.telegram_chat_id,
