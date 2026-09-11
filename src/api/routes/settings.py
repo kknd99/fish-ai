@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_process_service
+from src.core.safe_paths import UnsafePathError, validate_account_state_dir
 from src.infrastructure.config.env_manager import env_manager
 from src.infrastructure.config.settings import (
     AISettings,
@@ -201,6 +202,15 @@ async def update_rotation_settings(settings: RotationSettingsModel):
     updates = {}
     payload = model_dump(settings, exclude_unset=True)
     for key, value in payload.items():
+        if key == "ACCOUNT_STATE_DIR" and value is not None:
+            # 该目录决定账号文件写到哪、从哪读。放任绝对路径等于
+            # "任意目录下的 *.json 都能读写删"（安全审计 M2），因此只接受
+            # 项目内的相对目录。
+            try:
+                updates[key] = validate_account_state_dir(value)
+            except UnsafePathError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            continue
         if isinstance(value, bool):
             updates[key] = _normalize_bool_value(value)
         else:
@@ -291,8 +301,22 @@ async def test_ai_settings(settings: dict):
         import httpx
 
         stored_api_key = env_manager.get_value("OPENAI_API_KEY", "")
+        stored_base_url = (env_manager.get_value("OPENAI_BASE_URL", "") or "").strip()
         submitted_api_key = settings.get("OPENAI_API_KEY", "")
-        api_key = submitted_api_key or stored_api_key
+        submitted_base_url = (settings.get("OPENAI_BASE_URL", "") or "").strip()
+
+        # 关键：允许"换端点"与"复用已存 key"同时发生，就等于把已存的
+        # OPENAI_API_KEY 送到调用者指定的任意地址（安全审计 C2）。
+        # 因此一旦请求指定了不同的 base_url，就必须自带 key。
+        if submitted_base_url and submitted_base_url != stored_base_url:
+            if not submitted_api_key:
+                return {
+                    "success": False,
+                    "message": "测试新的接口地址时必须同时提供 API Key（不会复用已保存的 Key）。",
+                }
+            api_key = submitted_api_key
+        else:
+            api_key = submitted_api_key or stored_api_key
 
         client_params = {
             "api_key": api_key,

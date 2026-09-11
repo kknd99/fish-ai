@@ -437,3 +437,59 @@ def test_ai_test_endpoint_falls_back_to_responses_when_chat_completions_api_404(
     assert request_history[0][1]["messages"][0]["content"] == settings.AI_TEST_PROMPT
     assert request_history[1][0] == "responses"
     assert request_history[1][1]["input"][0]["content"][0]["text"] == settings.AI_TEST_PROMPT
+
+
+def test_ai_test_endpoint_never_reuses_stored_key_for_a_new_base_url(tmp_path, monkeypatch):
+    """安全审计 C2 回归：请求指定了不同的 base_url 时，不得复用已保存的 OPENAI_API_KEY。
+
+    原实现 ``api_key = submitted_api_key or stored_api_key`` 会把已存的 key
+    连同调用者指定的 base_url 一起发给对方，等于一键窃取付费账号。
+    """
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "OPENAI_API_KEY=sk-stored-secret\n"
+        "OPENAI_BASE_URL=https://real.example/v1\n"
+        "OPENAI_MODEL_NAME=real-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    built_clients = []
+
+    class _RecordingOpenAI:
+        def __init__(self, **kwargs):
+            built_clients.append(kwargs)
+
+    import openai
+
+    monkeypatch.setattr(openai, "OpenAI", _RecordingOpenAI)
+
+    client = _build_settings_client()
+
+    # 1) 换端点且不带 key → 必须直接拒绝，且**不得构造客户端**（即不发任何请求）
+    response = client.post(
+        "/api/settings/ai/test",
+        json={"OPENAI_BASE_URL": "https://attacker.example/v1", "OPENAI_MODEL_NAME": "x"},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is False
+    assert built_clients == [], "换了端点却仍构造了客户端：已存 key 会被送到调用者指定的地址"
+
+    # 2) 换端点但自带 key → 使用调用者提供的 key
+    client.post(
+        "/api/settings/ai/test",
+        json={
+            "OPENAI_API_KEY": "sk-caller",
+            "OPENAI_BASE_URL": "https://attacker.example/v1",
+            "OPENAI_MODEL_NAME": "x",
+        },
+    )
+    assert built_clients[-1]["api_key"] == "sk-caller"
+
+    # 3) 与已存 base_url 一致且不带 key → 允许复用已存 key（保留原有便利性）
+    client.post(
+        "/api/settings/ai/test",
+        json={"OPENAI_BASE_URL": "https://real.example/v1", "OPENAI_MODEL_NAME": "real-model"},
+    )
+    assert built_clients[-1]["api_key"] == "sk-stored-secret"
