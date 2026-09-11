@@ -1,0 +1,149 @@
+{
+  "data": {
+    "resultList": [
+      {
+        "data": {
+          "item": {
+            "main": {
+              "exContent": {
+                "title": "坏条目-价格异常",
+                "price": [
+                  {
+                    "text": "¥万"
+                  }
+                ],
+                "itemId": "bad-1"
+              },
+              "targetUrl": "fleamarket://item?id=bad-1"
+            }
+          }
+        }
+      },
+      {
+        "data": {
+          "item": {
+            "main": {
+              "exContent": {
+                "title": "iPhone 15 Pro",
+                "price": [
+                  {
+                    "text": "1.2万"
+                  }
+                ],
+                "area": "Shanghai",
+                "userNickName": "seller_01",
+                "picUrl": "https://img.example.com/a7m4.jpg",
+                "itemId": "999",
+                "oriPrice": "¥16999",
+                "fishTags": {
+                  "r1": {
+                    "tagList": [
+                      {
+                        "data": {
+                          "content": "验货宝"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "clickParam": {
+                "args": {
+                  "publishTime": "1710000000000",
+                  "wantNum": 12,
+                  "tag": "freeship"
+                }
+              },
+              "targetUrl": "fleamarket://item?id=999"
+            }
+          }
+        }
+      },
+      {
+        "data": {
+          "item": {
+            "main": {
+              "exContent": {
+                "title": "缺发布时间的商品",
+                "price": [
+                  {
+                    "text": "¥"
+                  },
+                  {
+                    "text": "13999"
+                  }
+                ],
+                "area": "Shanghai",
+                "userNickName": "seller_01",
+                "picUrl": "https://img.example.com/a7m4.jpg",
+                "itemId": "888",
+                "oriPrice": "¥16999",
+                "fishTags": {
+                  "r1": {
+                    "tagList": [
+                      {
+                        "data": {
+                          "content": "验货宝"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "clickParam": {
+                "args": {
+                  "wantNum": 12,
+                  "tag": "freeship"
+                }
+              },
+              "targetUrl": "fleamarket://item?id=888"
+            }
+          }
+        }
+      },
+      {
+        "data": {
+          "item": {
+            "main": {
+              "exContent": {
+                "title": "Sony A7M4 Body",
+                "price": [
+                  {
+                    "text": "¥"
+                  },
+                  {
+                    "text": "13999"
+                  }
+                ],
+                "area": "Shanghai",
+                "userNickName": "seller_01",
+                "picUrl": "https://img.example.com/a7m4.jpg",
+                "itemId": "123456",
+                "oriPrice": "¥16999",
+                "fishTags": {
+                  "r1": {
+                    "tagList": [
+                      {
+                        "data": {
+                          "content": "验货宝"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "clickParam": {
+                "args": {
+                  "publishTime": "1710000000000",
+                  "wantNum": 12,
+                  "tag": "freeship"
+                }
+              },
+              "targetUrl": "fleamarket://item?id=123456"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -19,51 +19,69 @@ async def _parse_search_results_json(json_data: dict, source: str) -> list:
             return []
 
         for item in items:
-            main_data = await safe_get(item, "data", "item", "main", "exContent", default={})
-            click_params = await safe_get(item, "data", "item", "main", "clickParam", "args", default={})
-
-            title = await safe_get(main_data, "title", default="未知标题")
-            price_parts = await safe_get(main_data, "price", default=[])
-            price = "".join([str(p.get("text", "")) for p in price_parts if isinstance(p, dict)]).replace("当前价", "").strip() if isinstance(price_parts, list) else "价格异常"
-            # 确保price是字符串类型，避免float类型导致的"in"操作错误
-            price = str(price) if not isinstance(price, str) else price
-            if "万" in price: price = f"¥{float(price.replace('¥', '').replace('万', '')) * 10000:.0f}"
-            area = await safe_get(main_data, "area", default="地区未知")
-            seller = await safe_get(main_data, "userNickName", default="匿名卖家")
-            raw_link = await safe_get(item, "data", "item", "main", "targetUrl", default="")
-            image_url = await safe_get(main_data, "picUrl", default="")
-            pub_time_ts = click_params.get("publishTime", "")
-            item_id = await safe_get(main_data, "itemId", default="未知ID")
-            original_price = await safe_get(main_data, "oriPrice", default="暂无")
-            wants_count = await safe_get(click_params, "wantNum", default='NaN')
-
-
-            tags = []
-            if await safe_get(click_params, "tag") == "freeship":
-                tags.append("包邮")
-            r1_tags = await safe_get(main_data, "fishTags", "r1", "tagList", default=[])
-            for tag_item in r1_tags:
-                content = await safe_get(tag_item, "data", "content", default="")
-                if "验货宝" in content:
-                    tags.append("验货宝")
-
-            page_data.append({
-                "商品标题": title,
-                "当前售价": price,
-                "商品原价": original_price,
-                "“想要”人数": wants_count,
-                "商品标签": tags,
-                "发货地区": area,
-                "卖家昵称": seller,
-                "商品链接": raw_link.replace("fleamarket://", "https://www.goofish.com/"),
-                "发布时间": datetime.fromtimestamp(int(pub_time_ts)/1000).strftime("%Y-%m-%d %H:%M") if pub_time_ts.isdigit() else "未知时间",
-                "商品ID": item_id
-            })
+            # 条目级隔离：历史实现里任意一个畸形条目都会让整页解析失败，
+            # 异常被外层吞掉后返回 []，调用方把它当作"没有更多结果"而结束分页 ——
+            # 明明是解析出错，却表现成"这页没东西"。现在坏条目只跳过它自己。
+            try:
+                parsed = await _parse_single_search_item(item)
+            except Exception as item_error:
+                print(f"LOG: ({source}) 跳过解析失败的条目: {item_error}")
+                continue
+            if parsed is not None:
+                page_data.append(parsed)
         print(f"LOG: ({source}) 成功解析到 {len(page_data)} 条商品基础信息。")
         return page_data
     except Exception as e:
         print(f"LOG: ({source}) JSON数据处理异常: {str(e)}")
         return []
+
+
+async def _parse_single_search_item(item: dict) -> dict | None:
+    """解析搜索列表中的单个条目。返回 None 表示这个条目没有可用信息。"""
+    main_data = await safe_get(item, "data", "item", "main", "exContent", default={})
+    click_params = await safe_get(item, "data", "item", "main", "clickParam", "args", default={})
+
+    title = await safe_get(main_data, "title", default="未知标题")
+    price_parts = await safe_get(main_data, "price", default=[])
+    price = "".join([str(p.get("text", "")) for p in price_parts if isinstance(p, dict)]).replace("当前价", "").strip() if isinstance(price_parts, list) else "价格异常"
+    # 确保price是字符串类型，避免float类型导致的"in"操作错误
+    price = str(price) if not isinstance(price, str) else price
+    if "万" in price: price = f"¥{float(price.replace('¥', '').replace('万', '')) * 10000:.0f}"
+    area = await safe_get(main_data, "area", default="地区未知")
+    seller = await safe_get(main_data, "userNickName", default="匿名卖家")
+    raw_link = await safe_get(item, "data", "item", "main", "targetUrl", default="")
+    pub_time_ts = click_params.get("publishTime", "")
+    item_id = await safe_get(main_data, "itemId", default="未知ID")
+    original_price = await safe_get(main_data, "oriPrice", default="暂无")
+    wants_count = await safe_get(click_params, "wantNum", default='NaN')
+
+    # 发布时间字段可能不是数字（页面结构调整时会变成字符串或缺失）
+    if isinstance(pub_time_ts, (int, float)) or (isinstance(pub_time_ts, str) and pub_time_ts.isdigit()):
+        publish_time = datetime.fromtimestamp(int(pub_time_ts) / 1000).strftime("%Y-%m-%d %H:%M")
+    else:
+        publish_time = "未知时间"
+
+    tags = []
+    if await safe_get(click_params, "tag") == "freeship":
+        tags.append("包邮")
+    r1_tags = await safe_get(main_data, "fishTags", "r1", "tagList", default=[])
+    for tag_item in r1_tags:
+        content = await safe_get(tag_item, "data", "content", default="")
+        if "验货宝" in content:
+            tags.append("验货宝")
+
+    return {
+        "商品标题": title,
+        "当前售价": price,
+        "商品原价": original_price,
+        "“想要”人数": wants_count,
+        "商品标签": tags,
+        "发货地区": area,
+        "卖家昵称": seller,
+        "商品链接": raw_link.replace("fleamarket://", "https://www.goofish.com/") if isinstance(raw_link, str) else "",
+        "发布时间": publish_time,
+        "商品ID": item_id
+    }
 
 
 async def calculate_reputation_from_ratings(ratings_json: list) -> dict:
