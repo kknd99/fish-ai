@@ -40,7 +40,7 @@ rsync -av --progress \
   --exclude '__pycache__' --exclude 'node_modules' --exclude 'dist' \
   --exclude '.pytest_cache' --exclude '.venv' \
   --exclude '.env' --exclude 'logs/*' --exclude 'images/*' --exclude 'jsonl/*' \
-  /Users/mc/Documents/ai-goofish-monitor/ target:/opt/ai-goofish-monitor/
+  /Users/mc/Documents/ai-goofish-monitor/ target:/volume1/docker/xyfish/
 ```
 
 - 保留 `.git`（只有 4.9 MB），目标机上仍能看历史、切分支。
@@ -64,11 +64,13 @@ tar czf ai-goofish-lan-deploy.tar.gz \
   --exclude='data' --exclude='price_history' --exclude='xianyu_state.json' \
   -C /Users/mc/Documents ai-goofish-monitor
 
-scp ai-goofish-lan-deploy.tar.gz target:/opt/
+scp ai-goofish-lan-deploy.tar.gz target:/volume1/docker/
 
 # 在目标机上解包并一键部署
-cd /opt && tar xzf ai-goofish-lan-deploy.tar.gz
-cd ai-goofish-monitor && bash deploy-lan.sh
+# 把包内容直接铺进项目目录：--strip-components=1 去掉包内的顶层目录名，
+# 已有的 .env、登录态等不会被覆盖（包里本来就不含它们）
+tar xzf ai-goofish-lan-deploy.tar.gz -C /volume1/docker/xyfish --strip-components=1
+cd /volume1/docker/xyfish && bash deploy-lan.sh
 ```
 
 包里只含代码、编排文件（yaml + json）与部署脚本，**不含** `.env`、登录态与运行数据。
@@ -246,6 +248,18 @@ docker compose -f docker-compose.lan.yaml up -d --build
   **在目标机上构建**的，天然匹配本机架构，不需要 buildx/QEMU 交叉构建。
 - **挂载文件属 root**：镜像内以 root 运行，bind mount 落盘的 `data/`、`logs/` 等属 root。
   想在宿主机直接改，`sudo chown -R $USER:$USER data logs jsonl state price_history`。
+
+### 群晖 / NAS 上的几点差异
+
+- **先确认架构**：`uname -m`。必须是 `x86_64` 或 `aarch64`；如果是 `armv7l`（32 位
+  ARM 的老型号），Playwright 的 Chromium 没有对应构建，这个项目在 Docker 里跑不起来。
+- **内存**：Chromium 加 Python 进程，建议 2 GB 以上可用内存；低配型号容易在抓取时被 OOM 杀掉。
+- **权限**：群晖上 `docker` 组的配置不保证生效，最省事是直接 `sudo bash deploy-lan.sh`
+  （脚本会提示你这一点）。用 sudo 后 bind mount 出来的 `data/`、`logs/` 属 root，
+  想在「File Station」里直接改就 `sudo chown -R $USER:users data logs jsonl state`。
+- **没有 SELinux**：挂载上的 `:z` 是空操作，不用管。
+- **图形界面替代方案**：群晖 Container Manager 的「项目」功能也能跑，把
+  `docker-compose.lan.yaml` 的内容粘进去即可；但用命令行跑脚本更直接，日志也更好看。
 
 ## 9. 常见坑
 
