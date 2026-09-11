@@ -16,3 +16,6 @@ qrcode
 pytest
 pytest-asyncio
 coverage
+
+# 开发/测试用：静态检查未定义名字（见 tests/unit/test_static_analysis.py）
+pyflakes
