@@ -124,6 +124,10 @@ class AppSettings(_EnvSettings):
     server_port: int = _env_field(8000, "SERVER_PORT")
     web_username: str = _env_field("admin", "WEB_USERNAME")
     web_password: str = _env_field("admin123", "WEB_PASSWORD")
+    #: 会话签名密钥。留空则由 WEB_PASSWORD 派生（改密码即失效所有会话）。
+    web_session_secret: Optional[str] = _env_field(None, "WEB_SESSION_SECRET")
+    #: 会话有效期，默认 7 天。
+    web_session_ttl_seconds: int = _env_field(7 * 24 * 3600, "WEB_SESSION_TTL_SECONDS", ge=60)
     task_log_retention_days: int = _env_field(7, "TASK_LOG_RETENTION_DAYS", ge=1)
 
     # 文件路径配置

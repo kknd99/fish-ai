@@ -1,11 +1,25 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import TheHeader from '@/components/layout/TheHeader.vue'
 import TheSidebar from '@/components/layout/TheSidebar.vue'
 import { useMobileNav } from '@/composables/useMobileNav'
+import { useAuth } from '@/composables/useAuth'
 
 const { isMobileNavOpen, closeMobileNav } = useMobileNav()
 const { t } = useI18n()
+const { verifySession } = useAuth()
+const router = useRouter()
+
+// 进入管理区时向服务端确认会话（真正的凭据是 HttpOnly cookie）。
+// 会话已过期就回登录页，而不是先渲染面板、再被第一个 401 踢出去。
+onMounted(async () => {
+  const ok = await verifySession()
+  if (!ok) {
+    router.push({ name: 'Login', query: { redirect: router.currentRoute.value.fullPath } })
+  }
+})
 </script>
 
 <template>

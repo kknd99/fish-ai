@@ -23,6 +23,16 @@ from src.api.dependencies import (
     set_scheduler_service,
     set_task_generation_service,
 )
+from src.api.auth import (
+    SESSION_COOKIE_NAME,
+    auth_middleware,
+    client_key,
+    create_session_token,
+    login_rate_limiter,
+    session_ttl_seconds,
+    session_username_from_cookies,
+    verify_credentials,
+)
 from src.services.task_service import TaskService
 from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
@@ -102,6 +112,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# 管理面访问控制：/api/* 与 API 文档必须带有效会话（见 src/api/auth.py）
+app.middleware("http")(auth_middleware)
+
 # 注册路由
 app.include_router(tasks.router)
 app.include_router(dashboard.router)
@@ -142,11 +155,51 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/auth/status")
-async def auth_status(payload: LoginRequest):
-    """检查认证状态"""
-    if payload.username == app_settings.web_username and payload.password == app_settings.web_password:
-        return {"authenticated": True, "username": payload.username}
-    raise HTTPException(status_code=401, detail="认证失败")
+async def auth_status(payload: LoginRequest, request: Request):
+    """校验凭据并签发会话 cookie。
+
+    注：请求体沿用 ``{username, password}`` 以兼容现有前端；成功后通过
+    ``Set-Cookie`` 下发 HttpOnly 会话，前端无需保存任何 token。
+    """
+    key = client_key(request)
+    if login_rate_limiter.is_blocked(key):
+        raise HTTPException(
+            status_code=429,
+            detail=f"登录失败次数过多，请 {login_rate_limiter.retry_after(key)} 秒后重试。",
+        )
+
+    if not verify_credentials(payload.username, payload.password):
+        login_rate_limiter.record_failure(key)
+        raise HTTPException(status_code=401, detail="认证失败")
+
+    login_rate_limiter.reset(key)
+    response = JSONResponse({"authenticated": True, "username": payload.username})
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=create_session_token(payload.username),
+        max_age=session_ttl_seconds(),
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.get("/auth/session")
+async def auth_session(request: Request):
+    """查询当前会话状态（前端启动时用来确认 cookie 是否仍然有效）。"""
+    username = session_username_from_cookies(request.cookies)
+    if username is None:
+        raise HTTPException(status_code=401, detail="未认证或会话已过期")
+    return {"authenticated": True, "username": username}
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    """清除会话 cookie。"""
+    response = JSONResponse({"message": "已退出登录"})
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return response
 
 
 # 主页路由 - 服务 Vue 3 SPA

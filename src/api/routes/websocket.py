@@ -5,6 +5,8 @@ WebSocket 路由
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Set
 
+from src.api.auth import websocket_is_authenticated
+
 
 router = APIRouter()
 
@@ -16,7 +18,12 @@ active_connections: Set[WebSocket] = set()
 async def websocket_endpoint(
     websocket: WebSocket,
 ):
-    """WebSocket 端点"""
+    """WebSocket 端点（握手阶段校验会话 cookie）。"""
+    # 未认证直接拒绝：WebSocket 不经过 HTTP 中间件，必须在这里单独校验。
+    if not websocket_is_authenticated(websocket):
+        await websocket.close(code=1008)
+        return
+
     # 接受连接
     await websocket.accept()
     active_connections.add(websocket)
@@ -29,11 +36,10 @@ async def websocket_endpoint(
             # 这里可以处理客户端发送的消息
             # 目前我们主要用于服务端推送，所以暂时不处理
     except WebSocketDisconnect:
-        active_connections.remove(websocket)
+        active_connections.discard(websocket)
     except Exception as e:
         print(f"WebSocket 错误: {e}")
-        if websocket in active_connections:
-            active_connections.remove(websocket)
+        active_connections.discard(websocket)
 
 
 async def broadcast_message(message_type: str, data: dict):
@@ -46,7 +52,11 @@ async def broadcast_message(message_type: str, data: dict):
     # 移除已断开的连接
     disconnected = set()
 
-    for connection in active_connections:
+    # 注意：必须遍历快照。本函数在 await 期间会让出事件循环，
+    # 而端点可能在此时从 active_connections 里移除连接（或新增），
+    # 直接遍历实时集合会抛 "Set changed size during iteration"，
+    # 该异常会沿着生命周期钩子逃逸并导致任务状态不再同步。
+    for connection in list(active_connections):
         try:
             await connection.send_json(message)
         except Exception:
