@@ -50,6 +50,7 @@ from src.services.site_adapter import (
 )
 from src.services.rotation_policy import (
     blacklist_disabled_warning,
+    compute_risk_control_backoff,
     can_rotate_account,
     can_rotate_proxy,
     compute_attempt_limit,
@@ -1292,6 +1293,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     # 与配置里 on_failure 模式的轮换走同一段逻辑，避免两处各改一份。
     force_rotate_account = False
     force_rotate_proxy = False
+    #: 本次运行命中风控的次数，用于计算退避（越大等越久，封顶 10 分钟）
+    risk_control_hits = 0
 
     for attempt in range(1, attempt_limit + 1):
         if attempt == 1:
@@ -1360,6 +1363,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             break
         except RiskControlError as e:
             last_error = str(e)
+            risk_control_hits += 1
             print(f"检测到风控或验证触发: {e}")
             # 风控常与出口 IP 绑定，换代理是有意义的；换不了就按原行为中断，
             # 交给 FailureGuard 计数暂停，避免无意义地反复触发风控。
@@ -1368,7 +1372,15 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 available_proxies=[i.value for i in proxy_pool.available_items()],
                 current_proxy=selected_proxy.value if selected_proxy else None,
             ):
-                print("[轮换] 风控常与出口 IP 相关，停用当前代理并换用其他代理重试...")
+                # 换 IP 之前先退避：命中风控后立刻重试往往再次被拦（对方看到的是
+                # 同一账号在极短时间内的连续行为），等一会儿再换更划算。
+                backoff = compute_risk_control_backoff(risk_control_hits)
+                if backoff > 0:
+                    print(
+                        f"[风控] 第 {risk_control_hits} 次命中，退避 {backoff} 秒后再换出口 IP 重试..."
+                    )
+                    await asyncio.sleep(backoff)
+                print("[轮换] 停用当前代理并换用其他代理重试...")
                 force_rotate_proxy = True
                 continue
             print(rotation_unavailable_hint(rotation_settings, kind="proxy"))

@@ -16,6 +16,29 @@ from typing import Iterable, Optional
 #: 单次任务运行中，因轮换而允许的最大尝试次数（避免池子很大时长时间占用）。
 MAX_ROTATION_ATTEMPTS = 6
 
+#: 命中风控后的退避基数与上限（秒）。指数增长：30 → 60 → 120 → 240 → 480 → 600。
+#: 为什么需要：命中风控后**立刻**换 IP 重试往往再次触发（对方看到的是短时间内
+#: 同一账号的高频行为），而上游原实现要么立刻重试、要么直接中断并暂停 24 小时。
+RISK_CONTROL_BACKOFF_BASE_SECONDS = 30
+RISK_CONTROL_BACKOFF_MAX_SECONDS = 600
+
+
+def compute_risk_control_backoff(
+    hit_index: int,
+    *,
+    base_seconds: int = RISK_CONTROL_BACKOFF_BASE_SECONDS,
+    max_seconds: int = RISK_CONTROL_BACKOFF_MAX_SECONDS,
+) -> int:
+    """第 ``hit_index`` 次命中风控后应等待的秒数（1 起算，指数增长并封顶）。
+
+    ``hit_index <= 0`` 返回 0（表示不必等待）。
+    """
+    if hit_index <= 0:
+        return 0
+    base = max(1, int(base_seconds))
+    ceiling = max(base, int(max_seconds))
+    return min(ceiling, base * (2 ** (hit_index - 1)))
+
 
 def _has_other(candidates: Iterable[str], current: Optional[str]) -> bool:
     """候选集合中是否存在与 ``current`` 不同的可用项。"""

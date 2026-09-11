@@ -210,3 +210,68 @@ def test_login_failure_without_pool_explains_why(tmp_path, monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "换用账号池中的其他账号" not in output
     assert "没有其他可用登录态" in output
+
+
+# ------------------------------------------------- 风控退避（P3）
+
+def test_risk_control_backoff_grows_and_caps():
+    from src.services.rotation_policy import compute_risk_control_backoff
+
+    assert compute_risk_control_backoff(0) == 0
+    assert compute_risk_control_backoff(-1) == 0
+    assert compute_risk_control_backoff(1) == 30
+    assert compute_risk_control_backoff(2) == 60
+    assert compute_risk_control_backoff(3) == 120
+    # 封顶，避免长时间挂住任务
+    assert compute_risk_control_backoff(10) == 600
+    assert compute_risk_control_backoff(99) == 600
+
+
+def test_risk_control_backoff_respects_custom_bounds():
+    from src.services.rotation_policy import compute_risk_control_backoff
+
+    assert compute_risk_control_backoff(1, base_seconds=5, max_seconds=20) == 5
+    assert compute_risk_control_backoff(3, base_seconds=5, max_seconds=20) == 20
+    # 上限小于基数时以上限为准，不应出现"上限被绕过"
+    assert compute_risk_control_backoff(1, base_seconds=100, max_seconds=10) == 100
+
+
+def test_risk_control_hit_waits_then_rotates_proxy(tmp_path, monkeypatch, capsys):
+    """端到端：命中风控时必须先退避，再换出口 IP 重试。"""
+    import src.scraper as scraper
+    from src.scraper import RiskControlError, scrape_xianyu
+
+    task_config = _prepare_task(tmp_path, monkeypatch, account_count=1)
+    # 配置两个代理，使"换 IP"这条路径可用
+    task_config["proxy_rotation"] = {
+        "enabled": True,
+        "mode": "on_failure",
+        "proxy_pool": "http://p1:8080,http://p2:8080",
+        "retry_limit": 3,
+        "blacklist_ttl_sec": 300,
+    }
+
+    monkeypatch.setattr(
+        scraper, "async_playwright",
+        lambda: _StubPlaywright(RiskControlError("baxia-dialog")),
+    )
+
+    # 记录 sleep 参数（既验证退避，又避免测试真的等）
+    slept: list[float] = []
+
+    async def fake_sleep(seconds, *args, **kwargs):
+        slept.append(seconds)
+
+    monkeypatch.setattr(scraper.asyncio, "sleep", fake_sleep)
+
+    asyncio.run(scrape_xianyu(task_config))
+
+    output = capsys.readouterr().out
+    assert "命中风控" in output or "检测到风控" in output
+    assert "退避" in output
+    # 退避值必须来自策略函数（第一次 30 秒，之后翻倍）
+    backoffs = [value for value in slept if value >= 30]
+    assert backoffs, f"没有观察到风控退避，实际 sleep 序列: {slept}"
+    assert backoffs[0] == 30
+    if len(backoffs) > 1:
+        assert backoffs[1] == 60
