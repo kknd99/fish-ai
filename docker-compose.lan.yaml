@@ -27,14 +27,19 @@ services:
     container_name: ai-goofish-monitor-app
     init: true
     ports:
-      # 绑所有网卡。只给部分网段访问请写具体地址，例如 "192.168.1.10:8000:8000"。
-      - "8000:8000"
+      # 绑所有网卡，宿主端口可用 APP_PORT 覆盖（例：APP_PORT=9000 docker compose -f ... up -d）。
+      # 只给部分网段访问请写具体地址，例如 "192.168.1.10:8000:8000"。
+      - "${APP_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
       # 容器内工作目录是 /app，SQLite 落在挂载出来的 ./data 上，重建容器不丢数据。
       APP_DATABASE_FILE: /app/data/app.sqlite3
       TZ: Asia/Shanghai
+      # 把容器内监听端口钉死成 8000：environment 的优先级高于 env_file，所以即使 .env
+      # 里写了 SERVER_PORT=9000 也不会把容器内的监听端口改掉（那会导致端口映射对不上，
+      # 表现为"容器起来了但连不上"）。要在宿主机换端口请用上面的 APP_PORT。
+      SERVER_PORT: "8000"
     volumes:
       # 单文件挂载：宿主机上必须已存在，否则会被建成目录。
       #

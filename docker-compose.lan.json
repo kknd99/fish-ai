@@ -6,14 +6,15 @@
       "container_name": "ai-goofish-monitor-app",
       "init": true,
       "ports": [
-        "8000:8000"
+        "${APP_PORT:-8000}:8000"
       ],
       "env_file": [
         ".env"
       ],
       "environment": {
         "APP_DATABASE_FILE": "/app/data/app.sqlite3",
-        "TZ": "Asia/Shanghai"
+        "TZ": "Asia/Shanghai",
+        "SERVER_PORT": "8000"
       },
       "volumes": [
         "./.env:/app/.env:z",

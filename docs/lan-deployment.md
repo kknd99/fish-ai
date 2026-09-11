@@ -51,6 +51,28 @@ rsync -av --progress \
   并额外带上 `data/`（SQLite 库在里面）。
 - **不要**搬 `state/`：里面的 cookie 已经失效，搬过去只会误导。
 
+**路线 A2：单文件部署包（最省事，推荐）**
+
+把要带的东西打成一个约 6.7 MB 的包，目标机只需解包再跑脚本：
+
+```bash
+# 在源机器上打包
+tar czf ai-goofish-lan-deploy.tar.gz \
+  --exclude='__pycache__' --exclude='node_modules' --exclude='dist' \
+  --exclude='.pytest_cache' --exclude='.venv' --exclude='.env' \
+  --exclude='logs' --exclude='images' --exclude='jsonl' --exclude='state' \
+  --exclude='data' --exclude='price_history' --exclude='xianyu_state.json' \
+  -C /Users/mc/Documents ai-goofish-monitor
+
+scp ai-goofish-lan-deploy.tar.gz target:/opt/
+
+# 在目标机上解包并一键部署
+cd /opt && tar xzf ai-goofish-lan-deploy.tar.gz
+cd ai-goofish-monitor && bash deploy-lan.sh
+```
+
+包里只含代码、编排文件（yaml + json）与部署脚本，**不含** `.env`、登录态与运行数据。
+
 **路线 B：推到你自己的私有仓库（便于以后 `git pull` 更新）**
 
 ```bash
@@ -102,9 +124,38 @@ FEISHU_BOT_SECRET=
 
 ## 4. 启动
 
+### 推荐：一键脚本
+
+仓库根目录的 `deploy-lan.sh` 把第 3 节的准备工作全包了，并且任何一步不满足就停下
+说明原因，绝不带着半成品启动（幂等，可反复执行）：
+
+```bash
+bash deploy-lan.sh
+```
+
+它会依次：检查 docker 与 compose v2 → 生成并校验 `.env`（缺 `.env` 时会从
+`.env.example` 生成并提示你填哪几项，`WEB_PASSWORD` 仍是 `admin123` 会被直接拒绝）→
+补齐 `config.json` / `xianyu_state.json` 两个单文件挂载点（必要时建空文件并设 0600）→
+建七个数据目录 → `up -d --build` → 等健康检查通过 → 打印本机与局域网访问地址。
+
+换宿主端口用 `APP_PORT`：`APP_PORT=9000 bash deploy-lan.sh`。
+
+### 手动：等价的命令
+
 ```bash
 docker compose -f docker-compose.lan.yaml up -d --build
 docker compose -f docker-compose.lan.yaml logs -f app
+```
+
+### JSON 版编排文件
+
+`docker-compose.lan.json` 与 `.yaml` 内容严格等价（脚本转出并核对过）。JSON 是
+YAML 1.2 的子集，所以 Compose 和 NAS / Portainer 面板都能直接吃，需要往面板里粘贴时
+用哪份都行。注意两个文件都**不在 Compose 的默认发现列表**里，必须显式 `-f` 指定，
+否则裸跑 `docker compose up -d` 会命中仓库里那份"拉上游镜像"的 `docker-compose.yaml`。
+
+```bash
+docker compose -f docker-compose.lan.json up -d --build
 ```
 
 本机自检（在目标机上执行）：
@@ -121,7 +172,9 @@ curl http://127.0.0.1:8000/health
 ## 5. 放行防火墙并从其它电脑访问
 
 容器内部 uvicorn 监听 `0.0.0.0:8000`，能不能从别的机器访问取决于两件事：
-compose 的端口映射（`docker-compose.lan.yaml` 已经是 `8000:8000`）和**目标机防火墙**。
+compose 的端口映射（`docker-compose.lan.yaml` 已经是 `${APP_PORT:-8000}:8000`，且
+容器内的 `SERVER_PORT` 被钉死为 8000，避免 `.env` 里改端口导致映射对不上）
+和**目标机防火墙**。
 
 - **Linux**：`sudo ufw allow from 192.168.0.0/16 to any port 8000 proto tcp`
   （firewalld：`sudo firewall-cmd --add-port=8000/tcp --permanent && sudo firewall-cmd --reload`）
