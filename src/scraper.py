@@ -435,6 +435,93 @@ def _is_forbidden_header(name: str) -> bool:
     return lowered.startswith("proxy-")
 
 
+def _build_snapshot_init_script(snapshot: dict) -> str:
+    """按快照恢复浏览器状态：localStorage / sessionStorage 与指纹字段。
+
+    为什么需要这个（实测）：
+
+    1. **快照里的 storage 从来没被用上**。扩展导出的 `storage.local` 里带着风控引擎
+       自己的状态（`baxia_entry_config`、`baxia_entry_config_time`）；代码此前只用
+       `storage` 这个键判断"这是增强快照"，却从不把内容恢复到浏览器里。于是每次
+       启动爬虫，站点看到的是一个**完全没有风控状态的陌生客户端**，直接弹验证框。
+    2. **指纹自相矛盾**。UA 被覆盖成"Windows Chrome 117"，但容器里实际是 Linux 上的
+       Chromium，`navigator.platform` 仍是 `Linux x86_64`、`userAgentData.brands`
+       仍是真实引擎版本（实测 `Chromium 151`）。这类"嘴上一个样、身上另一个样"的
+       组合正是无头检测最常抓的信号。
+
+    这里把 `navigator.platform`、`navigator.userAgentData` 对齐到快照声明，
+    并把 storage 里的键值写回对应的存储。
+
+    注意：Client Hints **请求头**（`sec-ch-ua`）由浏览器网络栈生成，脚本改不了；
+    要让它也一致需要装真正的 Chrome（见 docs）。
+    """
+    env = snapshot.get("env") or {}
+    navigator_info = env.get("navigator") or {}
+    storage = snapshot.get("storage") or {}
+
+    payload = {
+        "platform": navigator_info.get("platform"),
+        "uaData": navigator_info.get("userAgentData"),
+        "languages": navigator_info.get("languages"),
+        "hardwareConcurrency": navigator_info.get("hardwareConcurrency"),
+        "deviceMemory": navigator_info.get("deviceMemory"),
+        "maxTouchPoints": navigator_info.get("maxTouchPoints"),
+        "local": storage.get("local") or {},
+        "session": storage.get("session") or {},
+    }
+
+    return f"""
+(() => {{
+  const data = {json.dumps(payload, ensure_ascii=False)};
+  const define = (name, value) => {{
+    try {{ if (value !== null && value !== undefined) Object.defineProperty(navigator, name, {{get: () => value}}); }} catch (e) {{}}
+  }};
+
+  // 1) 对齐 navigator.platform（快照声明 Win32，容器里实际是 Linux x86_64）
+  define('platform', data.platform);
+
+  // 2) 对齐语言、CPU/内存、触摸点数。
+  //    旧脚本把它们写死成移动端值（maxTouchPoints=5、4 种语言），
+  //    与"Windows 桌面 Chrome"的 UA 自相矛盾。
+  if (Array.isArray(data.languages) && data.languages.length) define('languages', data.languages);
+  define('hardwareConcurrency', data.hardwareConcurrency);
+  define('deviceMemory', data.deviceMemory);
+  define('maxTouchPoints', data.maxTouchPoints);
+
+  // 3) 对齐 userAgentData（快照声明 Chrome 117，实际是 Chromium 151）
+  try {{
+    const ua = data.uaData;
+    if (ua && typeof ua === 'object') {{
+      const brands = (ua.brands || []).map((b) => ({{brand: b.brand, version: String(b.version)}}));
+      const uaData = {{
+        brands: brands,
+        mobile: !!ua.mobile,
+        platform: ua.platform,
+        getHighEntropyValues: () => Promise.resolve({{
+          architecture: '', bitness: '', brands: brands,
+          mobile: !!ua.mobile, model: '', platform: ua.platform,
+          platformVersion: '', uaFullVersion: '', wow64: false,
+        }}),
+        toJSON: () => ({{brands: brands, mobile: !!ua.mobile, platform: ua.platform}}),
+      }};
+      Object.defineProperty(navigator, 'userAgentData', {{get: () => uaData}});
+    }}
+  }} catch (e) {{}}
+
+  // 4) 恢复 storage（含风控引擎状态）——opaque origin 上访问会抛异常，忽略即可
+  const restore = (store, items) => {{
+    try {{
+      for (const key of Object.keys(items || {{}})) {{
+        store.setItem(key, items[key]);
+      }}
+    }} catch (e) {{}}
+  }};
+  try {{ restore(window.localStorage, data.local); }} catch (e) {{}}
+  try {{ restore(window.sessionStorage, data.session); }} catch (e) {{}}
+}})();
+"""
+
+
 def _build_extra_headers(raw_headers: Optional[dict]) -> dict:
     """从快照的 headers 里挑出可以安全透传的部分。
 
@@ -765,7 +852,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 // 模拟触摸支持
                 Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 5});
 
-                // 覆盖permissions查询（避免暴露自动化）
+                /*
+                 * 覆盖permissions查询（避免暴露自动化）
+                 */
                 const originalQuery = window.navigator.permissions.query;
                 window.navigator.permissions.query = (parameters) => (
                     parameters.name === 'notifications' ?
@@ -773,6 +862,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         originalQuery(parameters)
                 );
             """)
+
+            # 按快照恢复 storage 与指纹字段（详见 _build_snapshot_init_script）
+            if isinstance(snapshot_data, dict) and any(
+                key in snapshot_data for key in ("env", "headers", "page", "storage")
+            ):
+                await context.add_init_script(_build_snapshot_init_script(snapshot_data))
 
             page = await context.new_page()
 
