@@ -22,3 +22,10 @@ data/
 price_history/
 *.md
 !README.md
+
+# 账号登录态：真实 cookie 绝不能进入 build context
+# （会随构建缓存/远端 DOCKER_HOST 一起外流，尽管 Dockerfile 并未 COPY 它们）
+state/
+xianyu_state.json
+*.sqlite3
+TRADE_KILL_SWITCH

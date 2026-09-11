@@ -12,6 +12,7 @@ from urllib.parse import quote
 from openai import APIStatusError
 from requests.exceptions import HTTPError
 
+from src.core.redact import redact_text
 from src.services.result_storage_service import save_result_record
 
 
@@ -36,7 +37,11 @@ def retry_on_failure(retries=3, delay=5):
                 except json.JSONDecodeError as e:
                     print(f"函数 {func.__name__} 第 {i + 1}/{retries} 次尝试失败: JSON解析错误 - {e}")
                 except Exception as e:
-                    print(f"函数 {func.__name__} 第 {i + 1}/{retries} 次尝试失败: {type(e).__name__} - {e}")
+                    # requests 的异常文本里带完整 URL，而通知渠道的 URL 往往就是凭据
+                    print(
+                        f"函数 {func.__name__} 第 {i + 1}/{retries} 次尝试失败: "
+                        f"{type(e).__name__} - {redact_text(e)}"
+                    )
 
                 if i < retries - 1:
                     print(f"将在 {delay} 秒后重试...")

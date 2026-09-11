@@ -4,10 +4,25 @@ services:
     container_name: ai-goofish-monitor-app
     init: true
     ports:
-      - "8000:8000"
+      # 只发布到回环地址：管理接口此前完全没有认证，这个默认值必须收紧。
+      # 需要局域网访问请显式改成 "8000:8000"，并确保已设置 WEB_PASSWORD
+      # 与会话密钥（认证实现见 src/api/auth.py）。
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     volumes:
-      - .:/app
+      # 开发模式只挂载需要的路径，而不是把整个仓库（含 .git、.env 明文、
+      # 本地密钥）以读写方式交给容器。
+      - ./src:/app/src
+      - ./spider_v2.py:/app/spider_v2.py
+      - ./prompts:/app/prompts
+      - ./static:/app/static
+      - ./data:/app/data
+      - ./state:/app/state
+      - ./logs:/app/logs
+      - ./images:/app/images
+      - ./jsonl:/app/jsonl
+      - ./price_history:/app/price_history
+      # 前端构建产物由镜像内提供；如需本地覆盖再挂 ./dist:/app/dist
       - /app/dist
     restart: unless-stopped

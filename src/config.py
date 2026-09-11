@@ -4,6 +4,8 @@ import sys
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from src.core.redact import redact_url
+
 # --- AI & Notification Configuration ---
 load_dotenv()
 
@@ -64,7 +66,8 @@ if not all([BASE_URL, MODEL_NAME]):
 else:
     try:
         if PROXY_URL:
-            print(f"正在为AI请求使用HTTP/S代理: {PROXY_URL}")
+            # 认证代理形如 http://user:pass@host，原文打印等于把凭据写进日志
+            print(f"正在为AI请求使用HTTP/S代理: {redact_url(PROXY_URL)}")
             # httpx 会自动从环境变量中读取代理设置
             os.environ['HTTP_PROXY'] = PROXY_URL
             os.environ['HTTPS_PROXY'] = PROXY_URL

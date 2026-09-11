@@ -33,6 +33,8 @@ from src.services.ai_response_parser import (
     parse_ai_response_json,
 )
 
+from src.core.redact import redact_url
+
 
 def _sanitize_no_proxy_env() -> None:
     """Strip CIDR prefix lengths from IPv6 entries in NO_PROXY / no_proxy.
@@ -90,7 +92,8 @@ class AIClient:
 
         try:
             if self.settings.proxy_url:
-                print(f"正在为 AI 请求使用代理: {self.settings.proxy_url}")
+                # 同 config.py：认证代理的凭据不能落到日志里
+                print(f"正在为 AI 请求使用代理: {redact_url(self.settings.proxy_url)}")
                 os.environ['HTTP_PROXY'] = self.settings.proxy_url
                 os.environ['HTTPS_PROXY'] = self.settings.proxy_url
 

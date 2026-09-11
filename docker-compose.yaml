@@ -5,7 +5,10 @@ services:
     pull_policy: always
     init: true
     ports:
-      - "8000:8000"
+      # 只发布到回环地址。管理接口的认证见 src/api/auth.py，但"默认不对全网开放"
+      # 仍是最有效的一道防线。需要局域网访问时显式改成 "8000:8000"，
+      # 并务必设置非默认的 WEB_PASSWORD（默认 admin/admin123 是公开文档里的值）。
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:

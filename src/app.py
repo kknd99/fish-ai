@@ -23,6 +23,7 @@ from src.api.dependencies import (
     set_scheduler_service,
     set_task_generation_service,
 )
+from src.core.secure_files import default_umask_is_permissive
 from src.api.auth import (
     SESSION_COOKIE_NAME,
     auth_middleware,
@@ -77,6 +78,11 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     print("正在启动应用...")
+    if default_umask_is_permissive():
+        print(
+            "提示: 当前进程 umask 允许他人读取新建文件。应用已对 cookie/.env/日志\n"
+            "      显式收紧权限；如需彻底默认收紧，请设置 umask 077（start.sh 已内置）。"
+        )
     bootstrap_sqlite_storage()
     cleanup_task_logs(keep_days=app_settings.task_log_retention_days)
 
