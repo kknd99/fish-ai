@@ -77,3 +77,47 @@ def test_ai_analysis_concurrency_env_override_is_capped(monkeypatch):
 
 def test_image_download_concurrency_default_is_within_cap():
     assert 1 <= DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY <= MAX_IMAGE_DOWNLOAD_CONCURRENCY
+
+
+# --------------------------------------------- 调试模式的交互等待（回归）
+
+def test_debug_wait_is_skipped_without_tty(monkeypatch, capsys):
+    """非交互式运行（GUI/调度器拉起的子进程）不能卡在 input() 上。
+
+    历史实现无条件 input()：stdin 不是终端时抛 EOFError，而且它位于 finally 中
+    browser.close() 之前 —— 一次成功的抓取会被记成失败，浏览器也不会被关闭。
+    """
+    from types import SimpleNamespace
+
+    import src.scraper as scraper
+
+    monkeypatch.setattr(scraper.sys, "stdin", SimpleNamespace(isatty=lambda: False))
+
+    assert scraper.wait_for_debug_close(3) is False
+    assert "跳过" in capsys.readouterr().out
+
+
+def test_debug_wait_returns_false_when_not_in_debug_mode(monkeypatch):
+    import src.scraper as scraper
+
+    # debug_limit=0 时连 stdin 都不该碰
+    monkeypatch.setattr(scraper.sys, "stdin", None)
+    assert scraper.wait_for_debug_close(0) is False
+
+
+def test_debug_wait_prompts_on_a_real_tty(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    import src.scraper as scraper
+
+    monkeypatch.setattr(scraper.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    called = {}
+
+    def fake_input(prompt):
+        called["prompt"] = prompt
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    assert scraper.wait_for_debug_close(2) is True
+    assert "按回车" in called["prompt"]

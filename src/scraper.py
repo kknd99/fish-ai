@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import sys
 from datetime import datetime
 from typing import Optional
 
@@ -107,6 +108,25 @@ def _resolve_browser_channel() -> str:
             EDGE_DOCKER_WARNING_PRINTED = True
         return "chromium"
     return "msedge" if LOGIN_IS_EDGE else "chrome"
+
+
+def wait_for_debug_close(debug_limit: int) -> bool:
+    """调试模式下等用户按回车再关浏览器；**非交互式（没有 TTY）直接跳过**。
+
+    历史实现是无条件 ``input()``，而它位于 ``finally`` 里、且排在
+    ``browser.close()`` 之前。当爬虫由 GUI / 调度器以子进程方式拉起
+    （``SPIDER_DEBUG_LIMIT`` 就是这么传的），stdin 不是终端，``input()`` 会抛
+    ``EOFError`` —— 结果不仅等待失败，**浏览器也不会被关闭**，一次本来成功的
+    抓取还会被记成失败。
+    """
+    if not debug_limit:
+        return False
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None or not stdin.isatty():
+        print("[调试] 当前不是交互式终端，跳过「按回车关闭浏览器」等待。")
+        return False
+    input("按回车键关闭浏览器...")
+    return True
 
 
 def _should_analyze_images(task_config: dict) -> bool:
@@ -1239,8 +1259,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     await analysis_dispatcher.join()
                 log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
                 await asyncio.sleep(5)
-                if debug_limit:
-                    input("按回车键关闭浏览器...")
+                wait_for_debug_close(debug_limit)
                 await browser.close()
 
         return processed_item_count
