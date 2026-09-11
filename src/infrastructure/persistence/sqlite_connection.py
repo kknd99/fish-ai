@@ -85,7 +85,9 @@ SCHEMA_STATEMENTS = (
         region TEXT,
         decision_mode TEXT NOT NULL,
         keyword_rules_json TEXT NOT NULL,
-        is_running INTEGER NOT NULL
+        is_running INTEGER NOT NULL,
+        trade_enabled INTEGER NOT NULL DEFAULT 0,
+        trade_action TEXT NOT NULL DEFAULT 'notify_link'
     )
     """,
     """
@@ -222,7 +224,38 @@ def init_schema(conn: sqlite3.Connection) -> None:
     for statement in SCHEMA_STATEMENTS:
         conn.execute(statement)
     _migrate_result_items_status(conn)
+    _migrate_tasks_trade_columns(conn)
     conn.commit()
+
+
+def _migrate_tasks_trade_columns(conn: sqlite3.Connection) -> None:
+    """为 tasks 表添加交易相关列（仅执行一次）。
+
+    为什么需要迁移而不是只改建表语句：``CREATE TABLE IF NOT EXISTS`` 对**已存在**的
+    表不会补列，老部署升级上来就会缺字段。这里沿用 ``_migrate_result_items_status``
+    的做法 —— 以 app_metadata 里的标记保证只跑一次，并对新库是无害的空操作。
+
+    默认值刻意是"交易关闭"（``trade_enabled=0``）：升级不应悄悄打开一个能动钱的功能。
+    """
+    marker = "migration:tasks_trade_columns"
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = ?", (marker,)
+    ).fetchone()
+    if row is not None:
+        return
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if "trade_enabled" not in columns:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN trade_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "trade_action" not in columns:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN trade_action TEXT NOT NULL DEFAULT 'notify_link'"
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES (?, 'done')",
+        (marker,),
+    )
 
 
 def _migrate_result_items_status(conn: sqlite3.Connection) -> None:

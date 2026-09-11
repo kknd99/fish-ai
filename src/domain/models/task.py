@@ -9,6 +9,7 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.core.cron_utils import validate_cron_expression
+from src.services.trade.adapters import ADAPTER_REGISTRY
 from src.services.decision import (
     is_registered,
     normalize_decision_mode,
@@ -23,6 +24,10 @@ from src.services.account_strategy_service import (
     clean_account_state_file,
     normalize_account_strategy,
 )
+
+
+#: 任务级交易动作默认值：命中后只推送**真实商品链接**并请人工确认（L1 半自动）。
+DEFAULT_TRADE_ACTION = "notify_link"
 
 
 class TaskStatus(str, Enum):
@@ -140,6 +145,9 @@ class Task(BaseModel):
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
     is_running: bool = False
+    # ---- 交易（默认关闭；开启后仍受全局 TRADE_ENABLED 与资金闸门约束）----
+    trade_enabled: bool = False
+    trade_action: str = DEFAULT_TRADE_ACTION
 
     @model_validator(mode="before")
     @classmethod
@@ -210,6 +218,23 @@ class TaskCreate(BaseModel):
     region: Optional[str] = None
     decision_mode: str = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+    trade_enabled: bool = False
+    trade_action: str = DEFAULT_TRADE_ACTION
+
+    @field_validator("trade_action", mode="before")
+    @classmethod
+    def check_trade_action(cls, value):
+        """交易动作必须对应一个已注册的执行适配器。
+
+        交易默认关闭；一旦开启，动作名写错会在**创建任务时**就报错，
+        而不是等到真要下单那一刻才发现（那时已经花掉时间与额度）。
+        """
+        if value is None:
+            return None
+        key = str(value).strip().lower()
+        if key not in ADAPTER_REGISTRY:
+            raise ValueError(f"不支持的交易动作: {value}")
+        return key
 
     @model_validator(mode="before")
     @classmethod
@@ -320,6 +345,23 @@ class TaskUpdate(BaseModel):
     region: Optional[str] = None
     decision_mode: Optional[str] = None
     keyword_rules: Optional[List[str]] = None
+    trade_enabled: Optional[bool] = None
+    trade_action: Optional[str] = None
+
+    @field_validator("trade_action", mode="before")
+    @classmethod
+    def check_trade_action(cls, value):
+        """交易动作必须对应一个已注册的执行适配器。
+
+        交易默认关闭；一旦开启，动作名写错会在**创建任务时**就报错，
+        而不是等到真要下单那一刻才发现（那时已经花掉时间与额度）。
+        """
+        if value is None:
+            return None
+        key = str(value).strip().lower()
+        if key not in ADAPTER_REGISTRY:
+            raise ValueError(f"不支持的交易动作: {value}")
+        return key
     is_running: Optional[bool] = None
 
     @field_validator("decision_mode", mode="before")

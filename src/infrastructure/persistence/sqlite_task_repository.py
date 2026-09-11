@@ -25,6 +25,8 @@ def _row_to_task(row) -> Task:
     payload["free_shipping"] = bool(payload["free_shipping"])
     payload["is_running"] = bool(payload["is_running"])
     payload["keyword_rules"] = json.loads(payload.pop("keyword_rules_json") or "[]")
+    payload["trade_enabled"] = bool(payload.get("trade_enabled", 0))
+    payload["trade_action"] = payload.get("trade_action") or "notify_link"
     return Task(**payload)
 
 
@@ -86,6 +88,7 @@ class SqliteTaskRepository(TaskRepository):
         "ai_prompt_base_file", "ai_prompt_criteria_file", "account_state_file",
         "account_strategy", "free_shipping", "new_publish_option", "region",
         "decision_mode", "keyword_rules_json", "is_running",
+        "trade_enabled", "trade_action",
     )
 
     def _insert_sql(self) -> str:
@@ -176,6 +179,8 @@ class SqliteTaskRepository(TaskRepository):
         values["personal_only"] = int(task.personal_only)
         values["free_shipping"] = int(task.free_shipping)
         values["is_running"] = int(task.is_running)
+        values["trade_enabled"] = int(getattr(task, "trade_enabled", False))
         values["keyword_rules_json"] = json.dumps(task.keyword_rules or [], ensure_ascii=False)
+        values["trade_action"] = str(getattr(task, "trade_action", "notify_link") or "notify_link")
         values.pop("keyword_rules", None)
         return values
