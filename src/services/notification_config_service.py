@@ -19,6 +19,8 @@ NOTIFICATION_FIELD_MAP = {
     "WX_BOT_URL": "wx_bot_url",
     "FEISHU_BOT_URL": "feishu_bot_url",
     "FEISHU_BOT_SECRET": "feishu_bot_secret",
+    "FEISHU_APP_ID": "feishu_app_id",
+    "FEISHU_APP_SECRET": "feishu_app_secret",
     "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
     "TELEGRAM_CHAT_ID": "telegram_chat_id",
     "TELEGRAM_API_BASE_URL": "telegram_api_base_url",
@@ -36,7 +38,7 @@ CHANNEL_NOTIFICATION_FIELDS = {
     "bark": {"BARK_URL"},
     "gotify": {"GOTIFY_URL", "GOTIFY_TOKEN"},
     "wecom": {"WX_BOT_URL"},
-    "feishu": {"FEISHU_BOT_URL", "FEISHU_BOT_SECRET"},
+    "feishu": {"FEISHU_BOT_URL", "FEISHU_BOT_SECRET", "FEISHU_APP_ID", "FEISHU_APP_SECRET"},
     "telegram": {
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
@@ -58,6 +60,7 @@ SECRET_NOTIFICATION_FIELDS = {
     "WX_BOT_URL",
     "FEISHU_BOT_URL",
     "FEISHU_BOT_SECRET",
+    "FEISHU_APP_SECRET",
     "TELEGRAM_BOT_TOKEN",
     "WEBHOOK_URL",
     "WEBHOOK_HEADERS",
@@ -105,6 +108,8 @@ def build_notification_settings_response(
         "WX_BOT_URL": "",
         "FEISHU_BOT_URL": "",
         "FEISHU_BOT_SECRET": "",
+        "FEISHU_APP_ID": notification_settings.feishu_app_id or "",
+        "FEISHU_APP_SECRET": "",
         "TELEGRAM_BOT_TOKEN": "",
         "TELEGRAM_CHAT_ID": notification_settings.telegram_chat_id or "",
         "TELEGRAM_API_BASE_URL": (
@@ -271,6 +276,8 @@ def load_notification_settings() -> NotificationSettings:
             "wx_bot_url": _normalize_existing_text(env_manager.get_value("WX_BOT_URL")),
             "feishu_bot_url": _normalize_existing_text(env_manager.get_value("FEISHU_BOT_URL")),
             "feishu_bot_secret": _normalize_existing_text(env_manager.get_value("FEISHU_BOT_SECRET")),
+            "feishu_app_id": _normalize_existing_text(env_manager.get_value("FEISHU_APP_ID")),
+            "feishu_app_secret": _normalize_existing_text(env_manager.get_value("FEISHU_APP_SECRET")),
             "telegram_bot_token": _normalize_existing_text(env_manager.get_value("TELEGRAM_BOT_TOKEN")),
             "telegram_chat_id": _normalize_existing_text(env_manager.get_value("TELEGRAM_CHAT_ID")),
             "telegram_api_base_url": (
@@ -372,6 +379,16 @@ def _validate_notification_settings(settings: NotificationSettings) -> None:
     if settings.feishu_bot_secret and not settings.feishu_bot_url:
         raise NotificationSettingsValidationError(
             "填写 FEISHU_BOT_SECRET 前必须先填写 FEISHU_BOT_URL"
+        )
+
+    # 缩略图能力依赖自建应用凭证；凭证不成对就没有意义，早点拦住比运行时静默降级好
+    if bool(settings.feishu_app_id) != bool(settings.feishu_app_secret):
+        raise NotificationSettingsValidationError(
+            "FEISHU_APP_ID 与 FEISHU_APP_SECRET 必须成对填写（用于上传商品缩略图）"
+        )
+    if settings.feishu_app_id and not settings.feishu_bot_url:
+        raise NotificationSettingsValidationError(
+            "填写飞书应用凭证前必须先填写 FEISHU_BOT_URL"
         )
 
     has_webhook_extras = any(

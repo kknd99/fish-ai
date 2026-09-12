@@ -64,6 +64,10 @@ class NotificationSettings(_EnvSettings):
     feishu_bot_url: Optional[str] = _env_field(None, "FEISHU_BOT_URL")
     #: 可选：机器人开启「签名校验」时必须填写，否则消息会被拒
     feishu_bot_secret: Optional[str] = _env_field(None, "FEISHU_BOT_SECRET")
+    #: 可选：自建应用凭证。仅在需要推送商品缩略图时填写（飞书发图必须先上传换
+    #: image_key，而上传接口需要 tenant_access_token）。留空则只发纯文本。
+    feishu_app_id: Optional[str] = _env_field(None, "FEISHU_APP_ID")
+    feishu_app_secret: Optional[str] = _env_field(None, "FEISHU_APP_SECRET")
     telegram_bot_token: Optional[str] = _env_field(None, "TELEGRAM_BOT_TOKEN")
     telegram_chat_id: Optional[str] = _env_field(None, "TELEGRAM_CHAT_ID")
     telegram_api_base_url: Optional[str] = _env_field(

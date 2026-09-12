@@ -37,13 +37,13 @@ const mutableInitialValues = initialValues as Record<string, string | boolean | 
 const mutableForm = form as Record<string, string | boolean | null | undefined>
 const mutableClearedFields = clearedFields as Record<string, boolean>
 
-const secretFields = ['BARK_URL', 'GOTIFY_TOKEN', 'WX_BOT_URL', 'FEISHU_BOT_URL', 'FEISHU_BOT_SECRET', 'TELEGRAM_BOT_TOKEN', 'WEBHOOK_URL', 'WEBHOOK_HEADERS'] as const
+const secretFields = ['BARK_URL', 'GOTIFY_TOKEN', 'WX_BOT_URL', 'FEISHU_BOT_URL', 'FEISHU_BOT_SECRET', 'FEISHU_APP_SECRET', 'TELEGRAM_BOT_TOKEN', 'WEBHOOK_URL', 'WEBHOOK_HEADERS'] as const
 const channelFields: Record<ChannelKey, (keyof NotificationSettingsUpdate)[]> = {
   ntfy: ['NTFY_TOPIC_URL'],
   bark: ['BARK_URL'],
   gotify: ['GOTIFY_URL', 'GOTIFY_TOKEN'],
   wecom: ['WX_BOT_URL'],
-  feishu: ['FEISHU_BOT_URL', 'FEISHU_BOT_SECRET'],
+  feishu: ['FEISHU_BOT_URL', 'FEISHU_BOT_SECRET', 'FEISHU_APP_ID', 'FEISHU_APP_SECRET'],
   telegram: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_API_BASE_URL'],
   webhook: ['WEBHOOK_URL', 'WEBHOOK_METHOD', 'WEBHOOK_CONTENT_TYPE', 'WEBHOOK_HEADERS', 'WEBHOOK_QUERY_PARAMETERS', 'WEBHOOK_BODY'],
 }
@@ -65,6 +65,8 @@ function syncFromSettings(settings: NotificationSettings) {
     WX_BOT_URL: '',
     FEISHU_BOT_URL: '',
     FEISHU_BOT_SECRET: '',
+    FEISHU_APP_ID: '',
+    FEISHU_APP_SECRET: '',
     TELEGRAM_BOT_TOKEN: '',
     WEBHOOK_URL: '',
     WEBHOOK_HEADERS: '',
@@ -75,6 +77,7 @@ function syncFromSettings(settings: NotificationSettings) {
   secretConfigured.WX_BOT_URL = !!settings.WX_BOT_URL_SET
   secretConfigured.FEISHU_BOT_URL = !!settings.FEISHU_BOT_URL_SET
   secretConfigured.FEISHU_BOT_SECRET = !!settings.FEISHU_BOT_SECRET_SET
+  secretConfigured.FEISHU_APP_SECRET = !!settings.FEISHU_APP_SECRET_SET
   secretConfigured.TELEGRAM_BOT_TOKEN = !!settings.TELEGRAM_BOT_TOKEN_SET
   secretConfigured.WEBHOOK_URL = !!settings.WEBHOOK_URL_SET
   secretConfigured.WEBHOOK_HEADERS = !!settings.WEBHOOK_HEADERS_SET
@@ -128,7 +131,7 @@ function buildScopedPayload(channel?: ChannelKey): NotificationSettingsUpdate {
     ? new Set<string>([...channelFields[channel].map((field) => field as string), 'PCURL_TO_MOBILE'])
     : null
   const textFields: (keyof NotificationSettingsUpdate)[] = [
-    'NTFY_TOPIC_URL', 'GOTIFY_URL', 'TELEGRAM_CHAT_ID', 'TELEGRAM_API_BASE_URL', 'WEBHOOK_METHOD',
+    'NTFY_TOPIC_URL', 'GOTIFY_URL', 'FEISHU_APP_ID', 'TELEGRAM_CHAT_ID', 'TELEGRAM_API_BASE_URL', 'WEBHOOK_METHOD',
     'WEBHOOK_CONTENT_TYPE', 'WEBHOOK_QUERY_PARAMETERS', 'WEBHOOK_BODY',
   ]
 
@@ -281,6 +284,15 @@ function resolveChannelBadge(channel: ChannelKey) {
             <Label class="pt-2">{{ t('notifyPanel.feishu.secretLabel') }}</Label>
             <Input type="password" :model-value="form.FEISHU_BOT_SECRET ?? ''" :placeholder="t('notifyPanel.secretKeepPlaceholder')" @update:model-value="(value) => updateSecretField('FEISHU_BOT_SECRET', String(value))" />
             <p class="text-xs text-slate-500">{{ secretConfigured.FEISHU_BOT_SECRET ? t('notifyPanel.feishu.secretConfiguredHint') : t('notifyPanel.feishu.secretOptionalHint') }}</p>
+            <div class="mt-3 space-y-2 rounded-lg border border-dashed p-3">
+              <p class="text-xs font-medium">{{ t('notifyPanel.feishu.thumbnailTitle') }}</p>
+              <p class="text-xs text-slate-500">{{ t('notifyPanel.feishu.thumbnailHint') }}</p>
+              <Label>{{ t('notifyPanel.feishu.appIdLabel') }}</Label>
+              <Input :model-value="form.FEISHU_APP_ID ?? ''" placeholder="cli_xxxxxxxxxxxx" @update:model-value="(value) => form.FEISHU_APP_ID = String(value)" />
+              <Label class="pt-1">{{ t('notifyPanel.feishu.appSecretLabel') }}</Label>
+              <Input type="password" :model-value="form.FEISHU_APP_SECRET ?? ''" :placeholder="t('notifyPanel.secretKeepPlaceholder')" @update:model-value="(value) => updateSecretField('FEISHU_APP_SECRET', String(value))" />
+              <p class="text-xs text-slate-500">{{ secretConfigured.FEISHU_APP_SECRET ? t('notifyPanel.feishu.appSecretConfiguredHint') : t('notifyPanel.feishu.appSecretOptionalHint') }}</p>
+            </div>
           </CardContent>
           <CardFooter class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><Badge :variant="isChannelConfigured('feishu') ? 'default' : 'outline'">{{ resolveChannelBadge('feishu') }}</Badge><div class="flex flex-wrap gap-2"><Button variant="ghost" size="sm" :disabled="props.isSaving" @click="clearChannel('feishu')"><Trash2 class="h-4 w-4" />{{ t('notifyPanel.clear') }}</Button><Button variant="outline" size="sm" :disabled="props.isSaving" @click="handleTest('feishu')"><TestTube2 class="h-4 w-4" />{{ t('notifyPanel.test') }}</Button></div></CardFooter>
         </Card>

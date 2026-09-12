@@ -260,6 +260,12 @@ const zhCNExtra = {
       secretLabel: '签名校验 Secret（可选）',
       secretOptionalHint: '机器人未开启「签名校验」时可留空。',
       secretConfiguredHint: '已保存 Secret（机器人开启签名校验时必需）。',
+      thumbnailTitle: '商品缩略图（可选）',
+      thumbnailHint: '飞书发图必须先上传换取 image_key，需要自建应用的凭证。填了下面的应用凭证后，推送会变成「图片 + 文字」的卡片；留空则只发文字。',
+      appIdLabel: '自建应用 App ID',
+      appSecretLabel: '自建应用 App Secret',
+      appSecretOptionalHint: '留空则不发缩略图。',
+      appSecretConfiguredHint: '已保存应用凭证，推送会带商品缩略图。',
     },
     telegram: {
       description: 'Bot Token 属于敏感字段，Chat ID 与反代地址可直接查看和修改。',

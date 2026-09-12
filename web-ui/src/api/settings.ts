@@ -23,6 +23,7 @@ export interface NotificationSettings {
   WX_BOT_URL_SET?: boolean
   FEISHU_BOT_URL_SET?: boolean
   FEISHU_BOT_SECRET_SET?: boolean
+  FEISHU_APP_SECRET_SET?: boolean
   TELEGRAM_BOT_TOKEN_SET?: boolean
   WEBHOOK_URL_SET?: boolean
   WEBHOOK_HEADERS_SET?: boolean
@@ -37,6 +38,8 @@ export interface NotificationSettingsUpdate {
   WX_BOT_URL?: string | null
   FEISHU_BOT_URL?: string | null
   FEISHU_BOT_SECRET?: string | null
+  FEISHU_APP_ID?: string | null
+  FEISHU_APP_SECRET?: string | null
   TELEGRAM_BOT_TOKEN?: string | null
   TELEGRAM_CHAT_ID?: string | null
   TELEGRAM_API_BASE_URL?: string | null

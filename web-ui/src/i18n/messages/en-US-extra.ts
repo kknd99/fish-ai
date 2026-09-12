@@ -260,6 +260,12 @@ const enUSExtra = {
       secretLabel: 'Signing secret (optional)',
       secretOptionalHint: 'Leave empty unless the bot has signature verification enabled.',
       secretConfiguredHint: 'Secret saved (required when signature verification is on).',
+      thumbnailTitle: 'Product thumbnail (optional)',
+      thumbnailHint: 'Feishu requires uploading an image to obtain an image_key, which needs a self-built app credential. With credentials below, pushes become image + text cards; otherwise plain text.',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
+      appSecretOptionalHint: 'Leave empty to send text only.',
+      appSecretConfiguredHint: 'App credential saved — pushes include the product thumbnail.',
     },
     telegram: {
       description: 'The bot token is sensitive, while Chat ID and API base URL can be viewed and updated directly.',

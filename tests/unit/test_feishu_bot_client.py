@@ -21,6 +21,7 @@ PRODUCT = {
     "商品标题": "Sony A7M4 机身",
     "当前售价": "¥3800",
     "商品链接": "https://www.goofish.com/item?id=1",
+    "商品主图链接": "https://img.alicdn.com/bao/uploaded/example.jpg",
     "卖家昵称": "卖家A",
 }
 
@@ -64,7 +65,9 @@ def test_payload_without_secret_has_no_signature_fields():
     assert "Sony A7M4 机身" in text
     assert "¥3800" in text
     assert "价格合适" in text
-    assert "https://www.goofish.com/item?id=1" in text
+    # 默认开启链接转换，因此消息里是手机端链接；电脑端链接已被去掉
+    assert "https://pages.goofish.com/sharexy" in text
+    assert "电脑端链接" not in text
     assert "timestamp" not in payload
     assert "sign" not in payload
 
@@ -87,16 +90,19 @@ def test_payload_includes_mobile_link_when_convertible():
 
     payload = client.build_payload(PRODUCT, "ok")
     text = payload["content"]["text"]
-    assert "手机端链接" in text
-    assert "电脑端链接" in text
+    assert "链接: https://" in text
+    # 电脑端链接已按要求去掉：两个链接内容重复，只保留手机端那份
+    assert "电脑端链接" not in text
+    assert "手机端链接" not in text
 
 
 def test_payload_omits_mobile_link_when_disabled():
     client = FeishuBotClient(bot_url="https://example.com/hook", pcurl_to_mobile=False)
 
     text = client.build_payload(PRODUCT, "ok")["content"]["text"]
-    assert "手机端链接" not in text
-    assert "电脑端链接" in text
+    # 没有手机端链接时退回电脑端链接，保证消息里仍有可点入口
+    assert "电脑端链接" not in text
+    assert "https://www.goofish.com/item?id=1" in text
 
 
 def test_client_is_disabled_without_url():
@@ -193,6 +199,8 @@ def test_factory_registers_feishu_channel():
         wx_bot_url=None,
         feishu_bot_url="https://open.feishu.cn/open-apis/bot/v2/hook/token",
         feishu_bot_secret=None,
+        feishu_app_id="cli_from_settings",
+        feishu_app_secret="secret_from_settings",
         telegram_bot_token=None,
         telegram_chat_id=None,
         telegram_api_base_url="https://api.telegram.org",
@@ -212,3 +220,30 @@ def test_factory_registers_feishu_channel():
     enabled = [client for client in clients if client.is_enabled()]
     assert [client.channel_key for client in enabled] == ["feishu"]
     assert enabled[0].display_name == "飞书"
+
+
+def test_factory_passes_app_credentials_for_thumbnail():
+    """应用凭证必须从设置传到客户端，否则缩略图功能形同虚设。"""
+    from src.infrastructure.config.settings import NotificationSettings
+    from src.infrastructure.external.notification_clients.factory import (
+        build_notification_clients,
+    )
+
+    settings = NotificationSettings.model_construct(
+        ntfy_topic_url=None, gotify_url=None, gotify_token=None, bark_url=None,
+        wx_bot_url=None,
+        feishu_bot_url="https://open.feishu.cn/open-apis/bot/v2/hook/token",
+        feishu_bot_secret=None,
+        feishu_app_id="cli_from_settings",
+        feishu_app_secret="secret_from_settings",
+        telegram_bot_token=None, telegram_chat_id=None,
+        telegram_api_base_url="https://api.telegram.org",
+        webhook_url=None, webhook_method="POST", webhook_headers=None,
+        webhook_content_type="JSON", webhook_query_parameters=None,
+        webhook_body=None, pcurl_to_mobile=True,
+    )
+
+    client = next(c for c in build_notification_clients(settings) if c.channel_key == "feishu")
+    assert client.app_id == "cli_from_settings"
+    assert client.app_secret == "secret_from_settings"
+    assert client.image_enabled is True

@@ -33,6 +33,8 @@ _SETTINGS_ENV_KEYS = [
     "WX_BOT_URL",
     "FEISHU_BOT_URL",
     "FEISHU_BOT_SECRET",
+    "FEISHU_APP_ID",
+    "FEISHU_APP_SECRET",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
     "TELEGRAM_API_BASE_URL",
@@ -555,6 +557,71 @@ def test_feishu_settings_round_trip_and_channel_listing(tmp_path, monkeypatch):
     assert payload["FEISHU_BOT_URL_SET"] is True
     assert payload["FEISHU_BOT_SECRET_SET"] is True
     assert "feishu" in payload["CONFIGURED_CHANNELS"]
+
+
+def test_feishu_app_credentials_round_trip(tmp_path, monkeypatch):
+    """应用凭证（缩略图用）：写入 .env、app_id 回显、app_secret 不回显。"""
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    client = _build_settings_client()
+    response = client.put(
+        "/api/settings/notifications",
+        json={
+            "FEISHU_BOT_URL": "https://open.feishu.cn/open-apis/bot/v2/hook/token-abc",
+            "FEISHU_APP_ID": "cli_test_app",
+            "FEISHU_APP_SECRET": "app-secret-value",
+        },
+    )
+
+    assert response.status_code == 200
+    written = env_file.read_text(encoding="utf-8")
+    assert "FEISHU_APP_ID=cli_test_app" in written
+    assert "FEISHU_APP_SECRET=app-secret-value" in written
+
+    payload = client.get("/api/settings/notifications").json()
+    # app_id 不是机密，回显出来便于确认配的是哪个应用；secret 必须脱敏
+    assert payload["FEISHU_APP_ID"] == "cli_test_app"
+    assert payload["FEISHU_APP_SECRET"] == ""
+    assert payload["FEISHU_APP_SECRET_SET"] is True
+
+
+def test_feishu_app_credentials_must_be_paired(tmp_path, monkeypatch):
+    """只填一半的凭证没有意义，应当直接拒绝。"""
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    client = _build_settings_client()
+    response = client.put(
+        "/api/settings/notifications",
+        json={
+            "FEISHU_BOT_URL": "https://open.feishu.cn/open-apis/bot/v2/hook/token-abc",
+            "FEISHU_APP_ID": "cli_test_app",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "成对" in response.json()["detail"]
+
+
+def test_feishu_app_credentials_require_bot_url(tmp_path, monkeypatch):
+    _clear_settings_env(monkeypatch)
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(env_manager, "env_file", env_file)
+
+    client = _build_settings_client()
+    response = client.put(
+        "/api/settings/notifications",
+        json={"FEISHU_APP_ID": "cli_test_app", "FEISHU_APP_SECRET": "app-secret-value"},
+    )
+
+    assert response.status_code == 422
+    assert "FEISHU_BOT_URL" in response.json()["detail"]
 
 
 def test_feishu_url_must_be_valid_http_url(tmp_path, monkeypatch):

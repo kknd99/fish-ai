@@ -78,6 +78,8 @@ class NotificationSettingsModel(BaseModel):
     WX_BOT_URL: Optional[str] = None
     FEISHU_BOT_URL: Optional[str] = None
     FEISHU_BOT_SECRET: Optional[str] = None
+    FEISHU_APP_ID: Optional[str] = None
+    FEISHU_APP_SECRET: Optional[str] = None
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
     TELEGRAM_API_BASE_URL: Optional[str] = None

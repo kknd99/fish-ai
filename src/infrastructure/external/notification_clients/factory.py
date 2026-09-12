@@ -26,6 +26,8 @@ def build_notification_clients(settings: NotificationSettings):
         FeishuBotClient(
             settings.feishu_bot_url,
             settings.feishu_bot_secret,
+            settings.feishu_app_id,
+            settings.feishu_app_secret,
             pcurl_to_mobile=pcurl_to_mobile,
         ),
         TelegramClient(
