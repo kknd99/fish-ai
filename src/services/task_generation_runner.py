@@ -7,7 +7,7 @@ import aiofiles
 
 from src.core.safe_paths import UnsafePathError, resolve_within
 from src.domain.models.task import TaskCreate, TaskGenerateRequest
-from src.prompt_utils import generate_criteria
+from src.prompt_utils import generate_criteria, strip_reasoning
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_service import TaskService
@@ -16,6 +16,10 @@ from src.services.task_service import TaskService
 #: 模型的 few-shot 参考范例（见 src/prompt_utils.py），一旦被某个恰好叫 "macbook"
 #: 的关键词覆盖，之后所有生成任务的分析标准都会被污染。
 PROTECTED_PROMPT_FILES = frozenset({"base_prompt.txt", "macbook_criteria.txt"})
+
+#: 生成的分析标准至少要这么多字符，否则视为被截断。
+#: 参考范例 macbook_criteria.txt 有数千字符，200 是很宽松的下限。
+MIN_CRITERIA_LENGTH = 200
 
 
 def build_criteria_filename(keyword: str) -> str:
@@ -67,12 +71,20 @@ def build_task_create(req: TaskGenerateRequest, criteria_file: str) -> TaskCreat
 
 
 async def save_generated_criteria(output_filename: str, generated_criteria: str) -> None:
-    if not generated_criteria or not generated_criteria.strip():
-        raise RuntimeError("AI 未能生成分析标准，返回内容为空。")
+    # 双重保险：即便上游没清洗，这里也不允许把思维链或半截内容写进 prompts/。
+    # 落一份垃圾会让该任务的**每一次** AI 分析都缺字段（实测踩过）。
+    cleaned = strip_reasoning(generated_criteria or "")
+    if not cleaned:
+        raise RuntimeError("AI 未能生成分析标准：返回内容为空或只有思考过程。")
+    if len(cleaned) < MIN_CRITERIA_LENGTH:
+        raise RuntimeError(
+            f"AI 生成的分析标准过短（{len(cleaned)} 字符，至少需要 {MIN_CRITERIA_LENGTH}），"
+            "疑似输出被截断。请重试或改用更遵循指令的模型。"
+        )
 
     os.makedirs("prompts", exist_ok=True)
     async with aiofiles.open(output_filename, "w", encoding="utf-8") as file:
-        await file.write(generated_criteria)
+        await file.write(cleaned)
 
 
 async def reload_scheduler(

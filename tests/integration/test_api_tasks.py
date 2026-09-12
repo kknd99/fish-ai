@@ -88,7 +88,9 @@ def test_generate_ai_task_returns_job_and_completes_async(api_client, api_contex
 
     async def fake_generate_criteria(*_args, **_kwargs):
         await asyncio.sleep(0.05)
-        return "[V6.3 核心升级]\\nApple Watch criteria"
+        # 真实的分析标准有数千字符；这里给足长度，避免撞上
+        # MIN_CRITERIA_LENGTH 的截断保护（那条保护另有单测覆盖）。
+        return "[V6.3 核心升级]\n" + "Apple Watch criteria 硬性原则与危险信号。" * 20
 
     monkeypatch.setattr(
         "src.services.task_generation_runner.generate_criteria",

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from typing import Awaitable, Callable, Optional
 
@@ -31,9 +32,39 @@ META_PROMPT_TEMPLATE = """
 2.  保留范例中的 `[V6.3 核心升级]`、`[V6.4 逻辑修正]` 等版本标记，这有助于保持格式一致性。
 3.  将范例中所有与 "MacBook" 相关的内容，替换为与用户需求商品相关的内容。
 4.  思考并生成针对新商品类型的“一票否决硬性原则”和“危险信号清单”。
+5.  **不要输出思考过程**：不要包含 <think>、<thinking>、<reasoning> 之类的标签，
+    也不要写“用户要求我……”这类自述，直接给出最终文本。
 """
 
 ProgressCallback = Callable[[str, str], Awaitable[None]]
+
+#: 模型可能把推理过程一并吐在正文里（实测遇到：整份 criteria 文件里只有一段
+#: 英文思维链，且因输出上限被截断在半句），必须剥离干净再存盘。
+_REASONING_BLOCK_RE = re.compile(
+    r"<\s*(think|thinking|reasoning|analysis)\s*>.*?<\s*/\s*\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+#: 没有闭合标签时（被 max_output_tokens 截断），从开标签起全部视为推理过程。
+_REASONING_OPEN_RE = re.compile(
+    r"<\s*(think|thinking|reasoning|analysis)\s*>",
+    re.IGNORECASE,
+)
+
+
+def strip_reasoning(text: str) -> str:
+    """剥离模型输出里的推理过程，只留下最终正文。
+
+    两种情况都要处理：
+    - ``<think>...</think>`` 这类闭合块，直接删除；
+    - 只有开标签、没有闭合标签（输出被截断），从开标签起整段丢弃。
+    """
+    if not text:
+        return ""
+    cleaned = _REASONING_BLOCK_RE.sub("", text)
+    open_match = _REASONING_OPEN_RE.search(cleaned)
+    if open_match:
+        cleaned = cleaned[: open_match.start()]
+    return cleaned.strip()
 
 
 async def _report_progress(
@@ -61,15 +92,25 @@ async def _request_generated_text(ai_client: AIClient, prompt: str) -> str:
         generated_text = await ai_client._call_ai(
             [{"role": "user", "content": prompt}],
             temperature=0.5,
-            max_output_tokens=800,
+            # 800 太小：推理型模型会先写一大段思考，正文还没开始就被截断，
+            # 于是存下来的是半截思维链（实测踩过）。
+            max_output_tokens=4000,
             enable_json_output=False,
         )
     except Exception as exc:
         print(f"调用 OpenAI API 时出错: {exc}")
         raise
 
+    cleaned = strip_reasoning(generated_text)
+    if not cleaned:
+        # 宁可失败也不要把垃圾落进 prompts/：那会让该任务的每次 AI 分析都缺字段。
+        raise RuntimeError(
+            "AI 只返回了思考过程（或输出被截断），没有可用的分析标准正文。"
+            "请重试，或改用更遵循指令的模型。"
+        )
+
     print("AI已成功生成内容。")
-    return generated_text.strip()
+    return cleaned
 
 
 async def _close_ai_client(
