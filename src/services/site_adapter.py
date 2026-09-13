@@ -23,6 +23,10 @@ from src.services.search_pagination import (
 #: 闲鱼详情接口片段（原先硬编码在 src/config.py 与 scraper 内联 lambda 里）
 DETAIL_API_URL_FRAGMENT = "h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail"
 
+#: 卖家主页商品列表接口片段（原先硬编码在 scrape_user_profile 的响应监听里）。
+#: 抽出来是为了让"探查已售标签"的诊断脚本与实际采集用同一个匹配串，避免两边走偏。
+ITEM_LIST_API_URL_FRAGMENT = "mtop.idle.web.xyh.item.list"
+
 #: 风控/验证弹窗选择器：出现即认为被拦住，任务应当中止而不是继续瞎点。
 #: 两个选择器各有名字，抓取流程按名字取用，避免出现 selectors[0] 这种下标访问。
 DIALOG_RISK_SELECTOR = "div.baxia-dialog-mask"

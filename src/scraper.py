@@ -46,6 +46,7 @@ from src.rotation import RotationPool, load_state_files, parse_proxy_pool, Rotat
 from src.services.decision import normalize_decision_mode
 from src.services.trade.pipeline import build_trade_runner, resolve_trade_db_path
 from src.services.site_adapter import (
+    ITEM_LIST_API_URL_FRAGMENT,
     detail_response_predicate,
     get_site_adapter,
     search_response_predicate,
@@ -634,7 +635,7 @@ async def scrape_user_profile(context, user_id: str) -> dict:
                     head_api_future.set_exception(e)
 
         # 捕获商品列表API
-        elif "mtop.idle.web.xyh.item.list" in response.url:
+        elif ITEM_LIST_API_URL_FRAGMENT in response.url:
             try:
                 data = await response.json()
                 all_items.extend(data.get("data", {}).get("cardList", []))
