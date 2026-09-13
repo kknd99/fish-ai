@@ -121,6 +121,17 @@ try:
     checks.append(("飞书图文卡片(build_card_payload)", hasattr(FeishuBotClient, "build_card_payload")))
 except Exception:
     checks.append(("飞书图文卡片", False))
+try:
+    from src.services.price_drop_service import detect_price_drops
+    checks.append(("降价提醒(detect_price_drops)", True))
+except Exception:
+    checks.append(("降价提醒(detect_price_drops)", False))
+try:
+    # 用字节码常量判断，避免依赖镜像里是否存在 .py 源文件
+    from src.parsers import _parse_single_search_item
+    checks.append(("搜索列表主图(picUrl)", "picUrl" in _parse_single_search_item.__code__.co_consts))
+except Exception:
+    checks.append(("搜索列表主图(picUrl)", False))
 for name, present in checks:
     print("%s|%s" % ("OK" if present else "MISSING", name))
 ' 2>/dev/null)"
