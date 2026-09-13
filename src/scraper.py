@@ -59,7 +59,7 @@ from src.services.rotation_policy import (
     rotation_unavailable_hint,
 )
 from src.failure_guard import FailureGuard
-from src.services.account_strategy_service import resolve_account_runtime_plan
+from src.services.account_strategy_service import resolve_rotation_plan as resolve_account_rotation_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.item_analysis_dispatcher import (
     ItemAnalysisDispatcher,
@@ -296,6 +296,47 @@ def _get_rotation_settings(task_config: dict) -> dict:
 #: AI 分析并发上限。该值可由任务配置给出（历史上没有上限），
 #: 它直接决定 LLM 并发与花费，因此在这里封顶（安全审计：可经 API 设成任意大）。
 MAX_AI_ANALYSIS_CONCURRENCY = 8
+
+
+def _log_rotation_decision(runtime_plan: dict, rotation_settings: dict, account_items) -> None:
+    """把"这次到底轮不轮换、为什么"打进日志。
+
+    以前这里什么都不说，于是 ``ACCOUNT_ROTATION_ENABLED=true`` 被静默压成 False 时
+    没有任何线索 —— 只能靠读源码才发现。一句话日志能省掉那半小时。
+    """
+    reason = runtime_plan.get("reason")
+    pool_size = len(account_items or [])
+    mode = rotation_settings.get("account_mode", "per_task")
+
+    if rotation_settings["account_enabled"]:
+        print(
+            f"[轮换] 账号轮换已启用（模式 {mode}，可用登录态 {pool_size} 个，"
+            f"来源 {runtime_plan['strategy']}/{reason}）。"
+        )
+        if runtime_plan.get("prefer_root_state") is False:
+            print(
+                f"[轮换] 注意：根目录的 {STATE_FILE} 不参与轮换，"
+                f"请在「账号管理」里维护 {rotation_settings['account_state_dir']}/ 下的登录态。"
+            )
+        return
+
+    if reason == "root_state":
+        print(
+            f"[轮换] 未启用：使用根目录登录态 {STATE_FILE}（策略 {runtime_plan['strategy']}）。"
+            "想启用账号轮换，请把任务策略设为 rotate，或设置 ACCOUNT_ROTATION_ENABLED=true "
+            f"并在 {rotation_settings['account_state_dir']}/ 放入登录态。"
+        )
+    elif reason == "fixed":
+        print(
+            f"[轮换] 未启用：任务固定绑定登录态 {runtime_plan.get('forced_account')}，"
+            "不会自动切换账号。"
+        )
+    else:
+        print(
+            f"[轮换] 未启用：没有可用的登录态（{rotation_settings['account_state_dir']}/ 为空，"
+            f"且根目录没有 {STATE_FILE}）。"
+        )
+
 
 #: 单任务最多翻页数。上限用于约束抓取量与风控暴露面。
 MAX_TASK_PAGES = 20
@@ -727,20 +768,20 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
 
     rotation_settings = _get_rotation_settings(task_config)
     account_items = load_state_files(rotation_settings["account_state_dir"])
-    runtime_plan = resolve_account_runtime_plan(
+    runtime_plan = resolve_account_rotation_plan(
         strategy=task_config.get("account_strategy"),
         account_state_file=task_config.get("account_state_file"),
         has_root_state_file=os.path.exists(STATE_FILE),
         available_account_files=account_items,
+        explicit_rotation_enabled=rotation_settings["account_enabled"],
     )
     forced_account = runtime_plan["forced_account"]
     if runtime_plan["prefer_root_state"]:
         account_items = [STATE_FILE]
-        rotation_settings["account_enabled"] = False
-    elif runtime_plan["use_account_pool"]:
-        rotation_settings["account_enabled"] = True
-    else:
-        rotation_settings["account_enabled"] = False
+    # 唯一决定项：池子里能用就轮换。以前这里是三分支手写覆盖，而读进来的
+    # ACCOUNT_ROTATION_ENABLED 被无条件盖掉 —— 开关怎么设都没反应。
+    rotation_settings["account_enabled"] = bool(runtime_plan["use_account_pool"])
+    _log_rotation_decision(runtime_plan, rotation_settings, account_items)
 
     account_pool = RotationPool(
         account_items, rotation_settings["account_blacklist_ttl"], "account"

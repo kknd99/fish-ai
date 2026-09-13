@@ -269,6 +269,59 @@ PY
   done
 fi
 
+# 轮换判定用容器里的**真实函数**算，不在 shell 里重写一遍优先级 ——
+# 重写一份迟早会和代码里的规则走偏，那时这个自检本身就成了误导。
+if [ "$state" = "running" ]; then
+  printf '\n  各任务实际会用哪个登录态：\n'
+  rotation_report="$($DOCKER exec "$CONTAINER" python -c '
+import json, os, sys
+sys.path.insert(0, "/app")
+from src.rotation import load_state_files
+from src.services.account_strategy_service import resolve_rotation_plan
+
+try:
+    with open("/app/config.json", encoding="utf-8") as fh:
+        tasks = (json.load(fh).get("tasks") or [])
+except Exception as exc:
+    print("  无法读取 config.json: %s" % exc)
+    sys.exit(0)
+
+enabled = os.getenv("ACCOUNT_ROTATION_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+state_dir = os.getenv("ACCOUNT_STATE_DIR", "state")
+pool = load_state_files(state_dir)
+has_root = os.path.exists("xianyu_state.json")
+
+print("  ACCOUNT_ROTATION_ENABLED=%s | 账号池 %d 个（%s/）| 根目录 xianyu_state.json %s"
+      % (enabled, len(pool), state_dir, "存在" if has_root else "不存在"))
+
+if not tasks:
+    print("  config.json 里没有任务")
+for task in tasks:
+    name = task.get("task_name") or "未命名任务"
+    plan = resolve_rotation_plan(
+        strategy=task.get("account_strategy"),
+        account_state_file=task.get("account_state_file"),
+        has_root_state_file=has_root,
+        available_account_files=pool,
+        explicit_rotation_enabled=enabled,
+    )
+    if plan["use_account_pool"]:
+        detail = "轮换（账号池，%s）" % plan["reason"]
+    elif plan["forced_account"]:
+        detail = "固定 %s" % plan["forced_account"]
+    elif plan["prefer_root_state"]:
+        detail = "不轮换，用根目录 xianyu_state.json"
+    else:
+        detail = "无可用登录态"
+    print("    - %s: %s" % (name, detail))
+' 2>/dev/null)"
+  if [ -z "$rotation_report" ]; then
+    warn "无法获取轮换判定（容器内执行失败）"
+  else
+    printf '%s\n' "$rotation_report"
+  fi
+fi
+
 # ---------------------------------------------------------------- 5. 失败保护
 section "5. 失败保护（FailureGuard）"
 

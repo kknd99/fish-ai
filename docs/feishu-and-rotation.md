@@ -145,6 +145,26 @@ picked = account_pool.pick_random()               # 启用轮换：只从 state/
 **所以启用轮换前，必须把登录态放进 `state/` 目录**，否则会直接报
 「未找到可用的登录状态文件，无法继续执行任务」。
 
+### ⚠️ 开关有三种，优先级从高到低
+
+以前这里只写了 `ACCOUNT_ROTATION_ENABLED`，但它**曾经是无效的**：`auto` 策略只要根目录
+存在 `xianyu_state.json` 就优先用它，而每个既有部署都有这个文件，于是开关被静默压成
+`false` —— 设置页上点了没反应，日志里也不说话。现在修好了，但优先级要清楚：
+
+| 优先级 | 设置 | 效果 |
+|---|---|---|
+| 1（最高） | 任务里 `account_state_file` 指定了文件（或策略 `fixed`） | 固定用该登录态，**不轮换** |
+| 2 | 任务策略 `rotate` | 用 `state/` 账号池，**轮换**（与全局开关无关） |
+| 3 | `ACCOUNT_ROTATION_ENABLED=true` + `state/` 非空 | 用账号池（**需要 `state/` 里真有账号**） |
+| 4 | 根目录存在 `xianyu_state.json` | 单账号模式，不轮换 |
+| 5 | 以上都不满足但 `state/` 非空 | 用账号池 |
+
+> 启用轮换的任务，请把 `account_strategy` 设为 `rotate`（Web UI「任务」→ 编辑 → 账号策略）。
+> 这比依赖全局开关更明确，也不会因为 `xianyu_state.json` 被重新创建而失效。
+
+**怎么确认真的生效了**：任务日志里会出现 `[轮换] 账号轮换已启用（模式 per_task，可用登录态 3 个…）`。
+如果打的是 `[轮换] 未启用：…`，后面会直接写明原因和开启方法。
+
 ### 步骤
 
 **1. 准备多个登录态**
@@ -183,8 +203,9 @@ for p in sorted(glob.glob("state/*.json")):
 
 ```ini
 # --- 账号轮换 ---
+# 需要 state/ 里已经有账号；只开开关但目录为空会回落到根目录登录态（不轮换）
 ACCOUNT_ROTATION_ENABLED=true
-# per_task：一个任务固定用一个账号，只有被风控时才换
+# per_task：一个任务固定用一个账号，只有被风控/登录失效时才换
 # on_failure：一失败就换账号并拉黑一段时间
 ACCOUNT_ROTATION_MODE=per_task
 ACCOUNT_STATE_DIR=state
@@ -192,11 +213,29 @@ ACCOUNT_ROTATION_RETRY_LIMIT=2
 ACCOUNT_BLACKLIST_TTL=1800
 ```
 
+**2.5 把要用轮换的任务策略设为 `rotate`（推荐）**
+
+Web UI「任务」→ 编辑 → 账号策略 → `rotate`。这样即使以后根目录又被创建出
+`xianyu_state.json`（例如在「登录状态」页重新导入过），轮换也不会失效。
+
 **3. 重建容器**
 
 ```bash
 sudo docker compose -f docker-compose.lan.yaml up -d --force-recreate
 ```
+
+> `restart` 不会重新读取 `.env` —— 必须 `up -d --force-recreate`。
+
+**4. 确认生效**
+
+任务日志里应当出现：
+
+```
+[轮换] 账号轮换已启用（模式 per_task，可用登录态 3 个，来源 auto/explicit_flag）。
+[轮换] 注意：根目录的 xianyu_state.json 不参与轮换，请在「账号管理」里维护 state/ 下的登录态。
+```
+
+只看到 `[轮换] 未启用：…` 就说明没生效，那一行会写明原因。
 
 ### 两种模式怎么选
 
@@ -209,7 +248,7 @@ sudo docker compose -f docker-compose.lan.yaml up -d --force-recreate
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `ACCOUNT_ROTATION_ENABLED` | `false` | 总开关 |
+| `ACCOUNT_ROTATION_ENABLED` | `false` | 开启账号轮换（需要 `state/` 里已有账号；任务策略 `rotate` 可越过它） |
 | `ACCOUNT_ROTATION_MODE` | `per_task` | `per_task` / `on_failure` |
 | `ACCOUNT_STATE_DIR` | `state` | 登录态目录（Docker 下别改成 `/app/state` 以外的路径） |
 | `ACCOUNT_ROTATION_RETRY_LIMIT` | `2` | 单个任务最多尝试几个账号 |
