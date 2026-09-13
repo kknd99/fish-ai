@@ -65,6 +65,12 @@ from src.services.item_analysis_dispatcher import (
     ItemAnalysisDispatcher,
     ItemAnalysisJob,
 )
+from src.services.price_drop_service import (
+    build_drop_product_data,
+    build_drop_reason,
+    detect_price_drops,
+    resolve_thresholds as resolve_price_drop_thresholds,
+)
 from src.services.price_history_service import (
     build_market_reference,
     load_price_snapshots,
@@ -143,6 +149,25 @@ def _format_failure_reason(reason: str, limit: int = 500) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3] + "..."
+
+
+async def _notify_price_drops(drops) -> None:
+    """为创出新低的商品发送降价提醒。
+
+    与推荐通知走同一条通道（含飞书图文卡片）；因为搜索结果里没有主图，
+    卡片会自动降级成纯文本（飞书客户端在主图缺失时就发文本）。
+    """
+    for drop in drops:
+        reason = build_drop_reason(drop)
+        product_data = build_drop_product_data(drop)
+        try:
+            await send_ntfy_notification(product_data, reason)
+            print(
+                f"   [降价] 已提醒: {drop.title[:24]}... "
+                f"¥{drop.previous_price:g} → ¥{drop.current_price:g}"
+            )
+        except Exception as exc:
+            print(f"   [降价] 发送降价提醒失败: {exc}")
 
 
 async def _notify_task_failure(
@@ -1188,6 +1213,22 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     )
                     if not basic_items:
                         break
+                    # 降价检测必须放在去重之前：会降价的恰恰是"已存在"的商品，
+                    # 而它们在下面的循环里会被直接 continue 跳过。这里用的是
+                    # 本次运行之前的历史快照（还没记录本次），所以对比基准正确。
+                    price_drops = []
+                    try:
+                        drop_settings = resolve_price_drop_thresholds()
+                        if drop_settings["enabled"]:
+                            price_drops = detect_price_drops(
+                                basic_items,
+                                historical_snapshots,
+                                min_percent=drop_settings["min_percent"],
+                                min_amount=drop_settings["min_amount"],
+                            )
+                    except Exception as exc:
+                        print(f"   [降价] 检测降价时出错（已跳过）: {exc}")
+
                     historical_snapshots.extend(
                         record_market_snapshots(
                             keyword=keyword,
@@ -1382,6 +1423,10 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                             await detail_page.close()
                             # --- 修改: 增加关闭页面后的短暂整理时间 ---
                             await random_sleep(2, 4)  # 原来是 (1, 2.5)
+
+                    # 本页处理完统一发降价提醒（放在循环外：循环里有 continue/break 分支）
+                    if price_drops:
+                        await _notify_price_drops(price_drops)
 
                     # --- 新增: 在处理完一页所有商品后，翻页前，增加一个更长的“休息”时间 ---
                     if not stop_scraping and page_num < max_pages:

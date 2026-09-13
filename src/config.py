@@ -34,6 +34,15 @@ LOGIN_IS_EDGE = os.getenv("LOGIN_IS_EDGE", "false").lower() == "true"
 RUNNING_IN_DOCKER = os.getenv("RUNNING_IN_DOCKER", "false").lower() == "true"
 AI_DEBUG_MODE = os.getenv("AI_DEBUG_MODE", "false").lower() == "true"
 SKIP_AI_ANALYSIS = os.getenv("SKIP_AI_ANALYSIS", "false").lower() == "true"
+
+# --- 降价提醒 ---
+#: 默认关闭：开启后会为"已推送过、但创出历史新低"的商品再发一次通知。
+#: 会降价的恰恰是已存在的商品，而爬虫对它们会去重跳过，因此这个功能是独立于
+#: 推荐通知的一条链路（检测发生在去重之前）。
+PRICE_DROP_ENABLED = os.getenv("PRICE_DROP_ENABLED", "false").lower() == "true"
+#: 降幅阈值：金额与比例满足其一即提醒（默认 50 元 或 5%）。
+PRICE_DROP_MIN_AMOUNT = os.getenv("PRICE_DROP_MIN_AMOUNT", "50")
+PRICE_DROP_MIN_PERCENT = os.getenv("PRICE_DROP_MIN_PERCENT", "5")
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 ENABLE_RESPONSE_FORMAT = os.getenv("ENABLE_RESPONSE_FORMAT", "true").lower() == "true"
 
