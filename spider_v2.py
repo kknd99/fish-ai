@@ -9,6 +9,7 @@ import re
 
 from src.config import STATE_FILE
 from src.core.safe_paths import UnsafePathError, safe_prompt_path
+from src.prompt_utils import criteria_warnings
 from src.services.decision import normalize_decision_mode, strategy_requires_prompt
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
 from src.scraper import scrape_xianyu
@@ -95,7 +96,7 @@ async def main():
 
     if not os.path.exists(STATE_FILE) and not has_bound_account(tasks_config) and not has_any_state_file():
         sys.exit(
-            f"错误: 未找到登录状态文件。请在 state/ 中添加账号或配置 account_state_file。"
+            "错误: 未找到登录状态文件。请在 state/ 中添加账号或配置 account_state_file。"
         )
 
     # 读取所有prompt文件内容（关键词模式不需要加载prompt）
@@ -134,6 +135,14 @@ async def main():
                     print(f"警告: 任务 '{task['task_name']}' 的prompt中仍包含占位符，替换可能失败。")
                 else:
                     print(f"✅ 任务 '{task['task_name']}' 的prompt生成成功，长度: {len(task['ai_prompt_text'])} 字符")
+
+                # 分析标准可疑（过短 / 混入思维链）就提前告警，别等到 AI 报错
+                for line in criteria_warnings(
+                    task['task_name'],
+                    task['ai_prompt_criteria_file'],
+                    criteria_text,
+                ):
+                    print(line)
 
             except UnsafePathError as e:
                 print(f"错误: 任务 '{task['task_name']}' 的prompt文件路径不合法（{e}），该任务的AI分析将被跳过。")

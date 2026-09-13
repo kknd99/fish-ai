@@ -7,7 +7,7 @@ import aiofiles
 
 from src.core.safe_paths import UnsafePathError, resolve_within
 from src.domain.models.task import TaskCreate, TaskGenerateRequest
-from src.prompt_utils import generate_criteria, strip_reasoning
+from src.prompt_utils import MIN_CRITERIA_LENGTH, generate_criteria, strip_reasoning
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_service import TaskService
@@ -16,10 +16,6 @@ from src.services.task_service import TaskService
 #: 模型的 few-shot 参考范例（见 src/prompt_utils.py），一旦被某个恰好叫 "macbook"
 #: 的关键词覆盖，之后所有生成任务的分析标准都会被污染。
 PROTECTED_PROMPT_FILES = frozenset({"base_prompt.txt", "macbook_criteria.txt"})
-
-#: 生成的分析标准至少要这么多字符，否则视为被截断。
-#: 参考范例 macbook_criteria.txt 有数千字符，200 是很宽松的下限。
-MIN_CRITERIA_LENGTH = 200
 
 
 def build_criteria_filename(keyword: str) -> str:

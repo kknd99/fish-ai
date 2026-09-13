@@ -38,6 +38,37 @@ META_PROMPT_TEMPLATE = """
 
 ProgressCallback = Callable[[str, str], Awaitable[None]]
 
+#: 分析标准文件的最小合理长度。参考范例 macbook_criteria.txt 有 2262 字符；
+#: 低于这个值通常意味着文件被截断、是空壳，或者干脆写错了内容（实测遇到过
+#: 只有 33 字符的文件，以及整份文件其实是模型思维链的情况）。
+MIN_CRITERIA_LENGTH = 200
+
+
+def criteria_warnings(task_name: str, criteria_path: str, criteria_text: str) -> list:
+    """检查某个任务的分析标准是否可疑，返回告警文案（空列表 = 没问题）。
+
+    两类问题实测都遇到过：
+    - 文件只有 33 字符的空壳；
+    - 整份文件其实是模型思维链（生成时没剥离 <think>），文件里写着"你的任务是
+      重新生成一份分析标准"，于是 AI 收到错误指令、响应缺字段。
+    这两种情况表面看都只是"AI 分析失败"，很难往文件本身想，所以提前告警。
+    """
+    stripped = (criteria_text or "").strip()
+    if len(stripped) < MIN_CRITERIA_LENGTH:
+        return [
+            f"⚠️  警告: 任务 '{task_name}' 的分析标准过短"
+            f"（{len(stripped)} 字符，建议至少 {MIN_CRITERIA_LENGTH}）：{criteria_path}",
+            "     可能是文件被截断、内容为空壳，或生成时把模型思维链写了进去。",
+            "     建议在 Web UI 里重新生成该任务的分析标准，或手工补齐。",
+        ]
+    if strip_reasoning(criteria_text or "") != stripped:
+        return [
+            f"⚠️  警告: 任务 '{task_name}' 的分析标准里疑似混入了模型思维链"
+            f"（<think> 标签）：{criteria_path}",
+            "     这会让 AI 收到错误的指令，建议重新生成或手工清理该文件。",
+        ]
+    return []
+
 #: 模型可能把推理过程一并吐在正文里（实测遇到：整份 criteria 文件里只有一段
 #: 英文思维链，且因输出上限被截断在半句），必须剥离干净再存盘。
 _REASONING_BLOCK_RE = re.compile(
@@ -189,7 +220,7 @@ async def update_config_with_new_task(new_task: dict, config_file: str = "config
         # 写回配置文件
         async with aiofiles.open(config_file, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(config_data, ensure_ascii=False, indent=2))
-            print(f"配置文件写入完成")
+            print("配置文件写入完成")
 
         print(f"成功！新任务 '{new_task.get('task_name')}' 已添加到 {config_file} 并已启用。")
         return True

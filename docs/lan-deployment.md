@@ -316,7 +316,34 @@ DOCKER_COMPOSE_BIN=~/.local/bin/docker-compose pytest tests/integration/test_com
 它覆盖：两份编排文件解析结果必须一致、`APP_PORT` 只改宿主端口、期望的挂载点齐全、
 挂载带 `:z` 标签、以及不写冗余的 `init: true`。
 
-## 10. 安全检查清单
+## 10. 日常自查：health-check.sh
+
+仓库根目录的 `health-check.sh` 把"这轮排查反复要问的东西"一次查完，适合在改动后、
+出问题时、或隔一段时间例行跑一次：
+
+```bash
+cd /volume1/docker/xyfish/fish-ai
+bash health-check.sh
+```
+
+它会逐项检查并给出 ✓ / ✗ / ⚠：
+
+| 检查项 | 能发现什么 |
+| --- | --- |
+| 容器与端口 | 容器是否在跑、端口映射、端口号对不对 |
+| **镜像内的补丁版本** | **"以为打了补丁，其实 Docker 用缓存跳过了 `COPY src`"** —— 这类问题一律在这里现形 |
+| 关键配置 | `.env` 必填项是否为空（只显示键名与长度，**不打印密钥内容**）、`WEB_PASSWORD` 是否仍是默认值 |
+| 登录态 | 每个登录态文件的 cookie 数、是否含 `unb`、**有多少个已过期（会被浏览器丢弃）**、是否混入 `<think>` |
+| 失败保护 | 哪些任务被暂停、暂停到什么时候、连续失败次数 |
+| 任务与结果 | 任务清单、cron、结果条数、最近抓取时间 |
+| HTTP | `/health` 是否返回 200 |
+
+退出码：`0` = 没有阻塞性问题；`1` = 有需要处理的问题。
+
+可用环境变量覆盖默认值：`CONTAINER=fish-ai-app`、`APP_PORT=8000`、
+`COMPOSE_FILE=docker-compose.lan.yaml`。
+
+## 11. 安全检查清单
 
 - [ ] `WEB_PASSWORD` 已改成非默认值（默认 `admin/admin123` 是公开文档里的值）
 - [ ] 只需要本机访问就别开 `8000:8000`，保持绑 `127.0.0.1`

@@ -78,6 +78,42 @@ def safe_print(text):
             print("[输出包含无法显示的字符]")
 
 
+#: 失败时把原始响应写进 AI 日志的截断上限，避免异常响应把日志撑爆。
+MAX_LOGGED_RESPONSE_CHARS = 20000
+
+
+def _append_ai_failure_log(
+    log_filepath: str,
+    attempt: int,
+    reason: str,
+    raw_response: object,
+) -> None:
+    """把失败时的原始响应追加进该次请求的 AI 日志。
+
+    此前日志里**只有请求摘要**（模型名、温度、token 上限），没有响应内容 ——
+    排查「响应缺少必需字段 'prompt_version'」这类问题时，只能靠反复试和猜。
+    现在每次校验失败都把原始响应落盘，看一眼日志就能定性。
+
+    格式是 JSONL：第一行是请求摘要，之后每行是一条失败记录。
+    """
+    if not log_filepath:
+        return
+    try:
+        text = raw_response if isinstance(raw_response, str) else repr(raw_response)
+        truncated = len(text) > MAX_LOGGED_RESPONSE_CHARS
+        entry = {
+            "attempt": attempt,
+            "failure_reason": reason,
+            "response_chars": len(text),
+            "response_truncated": truncated,
+            "raw_response": text[:MAX_LOGGED_RESPONSE_CHARS],
+        }
+        with open(log_filepath, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        safe_print(f"   [日志] 追加AI失败响应时出错: {exc}")
+
+
 def _build_debug_request_summary(api_mode: str, request_params: dict) -> dict:
     summary = {
         "api_mode": api_mode,
@@ -366,6 +402,8 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
     )
 
     # 保存最终传输内容到日志文件
+    # 先初始化为空串：日志写入失败时，后面追加失败响应仍需要一个已定义的路径
+    log_filepath = ""
     try:
         # 创建logs文件夹
         logs_dir = os.path.join("logs", "ai")
@@ -453,18 +491,30 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
                     safe_print(f"   [AI分析] 第{attempt + 1}次尝试成功，响应格式验证通过")
                     return parsed_response
                 safe_print(f"   [AI分析] 第{attempt + 1}次尝试格式验证失败")
+                _append_ai_failure_log(
+                    log_filepath,
+                    attempt + 1,
+                    "格式验证失败：缺少必需字段或字段类型不正确",
+                    ai_response_content,
+                )
                 if attempt < max_retries - 1:
                     safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
                     continue
                 raise ValueError("AI响应格式缺少必需字段或字段类型不正确。")
             except json.JSONDecodeError as e:
                 safe_print(f"   [AI分析] 第{attempt + 1}次尝试JSON解析失败: {e}")
+                _append_ai_failure_log(
+                    log_filepath, attempt + 1, f"JSON解析失败: {e}", ai_response_content
+                )
                 if attempt < max_retries - 1:
                     safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
                     continue
                 raise e
             except EmptyAIResponseError as e:
                 safe_print(f"   [AI分析] 第{attempt + 1}次尝试返回空响应: {e}")
+                _append_ai_failure_log(
+                    log_filepath, attempt + 1, f"返回空响应: {e}", ai_response_content
+                )
                 if attempt < max_retries - 1:
                     safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
                     continue

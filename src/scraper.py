@@ -687,9 +687,18 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     result_filename = build_result_filename(keyword)
     processed_links = load_processed_link_keys(keyword)
     if processed_links:
-        print(f"LOG: 发现已存在结果集 {result_filename}，已加载 {len(processed_links)} 个历史商品用于去重。")
+        print(
+            f"LOG: 该关键词在数据库中有历史记录（去重标识「{result_filename}」），"
+            f"已加载 {len(processed_links)} 个商品用于去重。"
+        )
     else:
-        print(f"LOG: 结果集 {result_filename} 当前为空，将写入新记录。")
+        # 措辞刻意点明这是"数据库里的去重标识"：此前写的是
+        # "结果集 xxx.jsonl 当前为空"，读起来像是在讲一个 jsonl 文件，
+        # 害得人去 jsonl/ 目录里翻（实际结果只写 SQLite，那个后缀只是标识的一部分）。
+        print(
+            f"LOG: 该关键词在数据库中没有历史记录（去重标识「{result_filename}」），"
+            "本次结果将写入数据库。"
+        )
 
     rotation_settings = _get_rotation_settings(task_config)
     account_items = load_state_files(rotation_settings["account_state_dir"])
