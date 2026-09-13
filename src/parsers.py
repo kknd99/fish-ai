@@ -54,6 +54,10 @@ async def _parse_single_search_item(item: dict) -> dict | None:
     item_id = await safe_get(main_data, "itemId", default="未知ID")
     original_price = await safe_get(main_data, "oriPrice", default="暂无")
     wants_count = await safe_get(click_params, "wantNum", default='NaN')
+    # 搜索列表本身就带主图（exContent.picUrl），不必等到详情页才有图。
+    # 详情页拿到更完整的图集时会覆盖这个字段；但降价提醒只跑在列表数据上
+    # （被去重跳过的商品不会再进详情页），所以这里是降价提醒能配图的唯一来源。
+    pic_url = await safe_get(main_data, "picUrl", default="")
 
     # 发布时间字段可能不是数字（页面结构调整时会变成字符串或缺失）
     if isinstance(pub_time_ts, (int, float)) or (isinstance(pub_time_ts, str) and pub_time_ts.isdigit()):
@@ -79,6 +83,7 @@ async def _parse_single_search_item(item: dict) -> dict | None:
         "发货地区": area,
         "卖家昵称": seller,
         "商品链接": raw_link.replace("fleamarket://", "https://www.goofish.com/") if isinstance(raw_link, str) else "",
+        "商品主图链接": pic_url if isinstance(pic_url, str) else "",
         "发布时间": publish_time,
         "商品ID": item_id
     }

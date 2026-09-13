@@ -36,6 +36,8 @@ class PriceDrop:
     lowest_before: float
     drop_amount: float
     drop_percent: float
+    #: 主图链接（来自搜索列表的 picUrl）。有图时飞书会发成图文卡片。
+    image_url: str = ""
 
     @property
     def is_new_low(self) -> bool:
@@ -124,6 +126,7 @@ def detect_price_drops(
                 lowest_before=lowest_before,
                 drop_amount=drop_amount,
                 drop_percent=drop_percent,
+                image_url=str(item.get("商品主图链接") or ""),
             )
         )
 
@@ -151,6 +154,8 @@ def build_drop_product_data(drop: PriceDrop) -> dict:
         "当前售价": f"{drop.current_price:g}",
         "商品链接": drop.link,
         "商品ID": drop.item_id,
+        # 始终带上这个键（缺失时为空串），webhook 模板引用它时不会渲染成 "None"
+        "商品主图链接": drop.image_url,
     }
 
 

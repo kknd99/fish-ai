@@ -143,3 +143,43 @@ class TestDropMessage:
         assert data["当前售价"] == "1099"
         assert data["商品链接"] == "https://e.com/i"
         assert "商品信息" not in data
+
+    def test_image_key_always_present(self):
+        """`商品主图链接` 始终存在（无图为空串），webhook 模板不会渲染出 None。"""
+        assert build_drop_product_data(self._drop())["商品主图链接"] == ""
+        data = build_drop_product_data(self._drop(image_url="https://img.e.com/a.jpg"))
+        assert data["商品主图链接"] == "https://img.e.com/a.jpg"
+
+
+class TestDropImage:
+    """降价提醒要能配图：主图取自搜索列表的 picUrl。
+
+    被去重跳过的商品不会再进详情页，列表里的 picUrl 是唯一图源。
+    """
+
+    def test_image_url_carried_from_search_item(self):
+        rows = [
+            {
+                "商品ID": "A",
+                "当前售价": "900",
+                "商品标题": "Sony A7M4 机身",
+                "商品链接": "https://e.com/i",
+                "商品主图链接": "https://img.e.com/a.jpg",
+            }
+        ]
+        drops = detect_price_drops(rows, [snap("A", 1000)])
+        assert len(drops) == 1
+        assert drops[0].image_url == "https://img.e.com/a.jpg"
+        # 一路传到通知渠道读的字段上
+        assert build_drop_product_data(drops[0])["商品主图链接"] == "https://img.e.com/a.jpg"
+
+    def test_missing_image_yields_empty_string(self):
+        drops = detect_price_drops([item("A", "900")], [snap("A", 1000)])
+        assert drops[0].image_url == ""
+        assert build_drop_product_data(drops[0])["商品主图链接"] == ""
+
+    def test_none_image_yields_empty_string(self):
+        """字段存在但为 None（接口偶尔这么给）不能变成 "None" 字符串。"""
+        rows = [dict(item("A", "900"), **{"商品主图链接": None})]
+        drops = detect_price_drops(rows, [snap("A", 1000)])
+        assert drops[0].image_url == ""

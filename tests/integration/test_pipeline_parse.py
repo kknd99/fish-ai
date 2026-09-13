@@ -21,6 +21,38 @@ def test_parse_search_results(load_json_fixture):
     assert item["商品链接"].startswith("https://www.goofish.com/")
 
 
+def test_parse_search_results_keeps_main_image(load_json_fixture):
+    """列表自带主图（exContent.picUrl）要抽出来 —— 降价提醒靠它配图。
+
+    被去重跳过的商品不会再进详情页拿图，所以这是降价提醒唯一的图源。
+    """
+    raw = load_json_fixture("search_results.json")
+    items = asyncio.run(_parse_search_results_json(raw, source="search"))
+    assert items[0]["商品主图链接"].startswith("https://")
+
+
+def test_parse_search_item_without_image_yields_empty_string():
+    """没有 picUrl 时字段仍在（空串），调用方按假值处理即可。"""
+    raw = {
+        "data": {
+            "resultList": [
+                {
+                    "data": {
+                        "item": {
+                            "main": {
+                                "exContent": {"title": "无图商品", "itemId": "1"},
+                                "targetUrl": "fleamarket://item?id=1",
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+    items = asyncio.run(_parse_search_results_json(raw, source="search"))
+    assert items[0]["商品主图链接"] == ""
+
+
 def test_parse_user_head_and_items(load_json_fixture):
     head_json = load_json_fixture("user_head.json")
     items_json = load_json_fixture("user_items.json")

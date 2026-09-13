@@ -154,8 +154,8 @@ def _format_failure_reason(reason: str, limit: int = 500) -> str:
 async def _notify_price_drops(drops) -> None:
     """为创出新低的商品发送降价提醒。
 
-    与推荐通知走同一条通道（含飞书图文卡片）；因为搜索结果里没有主图，
-    卡片会自动降级成纯文本（飞书客户端在主图缺失时就发文本）。
+    与推荐通知走同一条通道。商品主图取自搜索列表的 ``picUrl``，所以飞书会直接
+    发成图文卡片；万一列表里没带图，飞书客户端会自动降级成纯文本。
     """
     for drop in drops:
         reason = build_drop_reason(drop)
