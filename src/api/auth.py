@@ -73,7 +73,7 @@ def session_secret() -> str:
     explicit = (settings.web_session_secret or os.getenv("WEB_SESSION_SECRET") or "").strip()
     if explicit:
         return explicit
-    return f"ai-goofish-session:{web_password()}"
+    return f"fish-ai-session:{web_password()}"
 
 
 def session_ttl_seconds() -> int:

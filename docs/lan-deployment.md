@@ -40,7 +40,7 @@ rsync -av --progress \
   --exclude '__pycache__' --exclude 'node_modules' --exclude '.pytest_cache' --exclude '.venv' \
   --exclude '/dist' --exclude '/web-ui/dist' \
   --exclude '.env' --exclude '/logs/*' --exclude '/images/*' --exclude '/jsonl/*' \
-  /Users/mc/Documents/ai-goofish-monitor/ target:/volume1/docker/xyfish/
+  /Users/mc/Documents/fish-ai/ target:/volume1/docker/xyfish/
 ```
 
 - 保留 `.git`（只有 4.9 MB），目标机上仍能看历史、切分支。
@@ -59,27 +59,27 @@ rsync -av --progress \
 # 在源机器上打包
 # 排除模式必须锚定到包内路径：写成 --exclude='data' 会连带删掉
 # web-ui/src/data/（前端构建会报 Cannot find module '@/data/goofishRegions.json'）
-tar czf ai-goofish-lan-deploy.tar.gz \
+tar czf fish-ai-lan-deploy.tar.gz \
   --exclude='__pycache__' --exclude='node_modules' \
   --exclude='.pytest_cache' --exclude='.venv' \
-  --exclude='ai-goofish-monitor/.env' \
-  --exclude='ai-goofish-monitor/xianyu_state.json' \
-  --exclude='ai-goofish-monitor/dist' \
-  --exclude='ai-goofish-monitor/web-ui/dist' \
-  --exclude='ai-goofish-monitor/data' \
-  --exclude='ai-goofish-monitor/logs' \
-  --exclude='ai-goofish-monitor/images' \
-  --exclude='ai-goofish-monitor/jsonl' \
-  --exclude='ai-goofish-monitor/state' \
-  --exclude='ai-goofish-monitor/price_history' \
+  --exclude='fish-ai/.env' \
+  --exclude='fish-ai/xianyu_state.json' \
+  --exclude='fish-ai/dist' \
+  --exclude='fish-ai/web-ui/dist' \
+  --exclude='fish-ai/data' \
+  --exclude='fish-ai/logs' \
+  --exclude='fish-ai/images' \
+  --exclude='fish-ai/jsonl' \
+  --exclude='fish-ai/state' \
+  --exclude='fish-ai/price_history' \
   -C /Users/mc/Documents ai-goofish-monitor
 
-scp ai-goofish-lan-deploy.tar.gz target:/volume1/docker/
+scp fish-ai-lan-deploy.tar.gz target:/volume1/docker/
 
 # 在目标机上解包并一键部署
 # 把包内容直接铺进项目目录：--strip-components=1 去掉包内的顶层目录名，
 # 已有的 .env、登录态等不会被覆盖（包里本来就不含它们）
-tar xzf ai-goofish-lan-deploy.tar.gz -C /volume1/docker/xyfish --strip-components=1
+tar xzf fish-ai-lan-deploy.tar.gz -C /volume1/docker/xyfish --strip-components=1
 cd /volume1/docker/xyfish && bash deploy-lan.sh
 ```
 

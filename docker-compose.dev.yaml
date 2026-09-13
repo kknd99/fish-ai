@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    container_name: ai-goofish-monitor-app
+    container_name: fish-ai-app
     init: true
     ports:
       # 只发布到回环地址：管理接口此前完全没有认证，这个默认值必须收紧。

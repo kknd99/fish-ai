@@ -1,3 +1,17 @@
+# 闲鱼智能监控机器人
+
+> **关于本项目**
+>
+> - 本仓库是 [Usagi-org/ai-goofish-monitor](https://github.com/Usagi-org/ai-goofish-monitor)
+>   的二次开发版本，已重命名为 **fish-ai**，主要用于个人自用场景。
+> - 原项目作者：**dingyufei615**，遵循 MIT 许可证（见 `LICENSE`，请勿删除）。
+> - 本项目在其基础上做了以下改动：
+>   - 修复增强快照请求头透传导致页面白屏的问题（`Sec-Fetch-*` 等 forbidden header）
+>   - 按快照恢复 storage 与浏览器指纹，降低风控触发概率
+>   - 飞书推送：去掉重复的电脑端链接，支持商品缩略图（图文卡片）
+>   - 修复生成分析标准时泄漏思维链、输出被截断的问题
+>   - 管理接口认证、路径收敛、失败保护与账号/代理轮换等加固
+
 # 闲鱼智能监控系统
 
 [中文] ｜ [English](README_EN.md)

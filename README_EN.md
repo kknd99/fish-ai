@@ -1,3 +1,19 @@
+# Xianyu Smart Monitor Bot
+
+> **About this repository**
+>
+> - This is a secondary-development fork of
+>   [Usagi-org/ai-goofish-monitor](https://github.com/Usagi-org/ai-goofish-monitor),
+>   renamed to **fish-ai**, maintained for personal use.
+> - Original author: **dingyufei615**, MIT licensed (see `LICENSE`, please keep it).
+> - Changes made in this fork:
+>   - Fixed blank pages caused by forwarding enhanced-snapshot request headers
+>     (`Sec-Fetch-*` and other forbidden headers)
+>   - Restore storage/fingerprint from the snapshot to reduce risk-control triggers
+>   - Feishu push: dropped the duplicated desktop link, added product thumbnails
+>   - Fixed leaked chain-of-thought and truncated output when generating criteria
+>   - Hardened admin auth, path containment, failure guard, account/proxy rotation
+
 # Xianyu Intelligent Monitor Bot
 
 [中文](README.md) ｜ [English]

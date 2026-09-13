@@ -9,7 +9,7 @@
 三件事都通过 `.env` 配置，改完**必须重建容器**：
 
 ```bash
-cd /volume1/docker/xyfish/ai-goofish-monitor
+cd /volume1/docker/xyfish/fish-ai
 sudo docker compose -f docker-compose.lan.yaml up -d --force-recreate
 ```
 
@@ -164,7 +164,7 @@ state/acc2.json
 放好后确认：
 
 ```bash
-cd /volume1/docker/xyfish/ai-goofish-monitor
+cd /volume1/docker/xyfish/fish-ai
 sudo ls -l state/
 sudo python3 -c '
 import glob, json, time
@@ -306,7 +306,7 @@ IP 轮换：使用代理 http://ip1:端口
 是用户 ID，少了它等于未登录）。修复方式是把过期时间改到未来（cookie **值不动**）：
 
 ```bash
-cd /volume1/docker/xyfish/ai-goofish-monitor
+cd /volume1/docker/xyfish/fish-ai
 sudo python3 -c '
 import json, pathlib, time
 p = pathlib.Path("xianyu_state.json")          # 账号池里的文件同理，换成 state/accX.json

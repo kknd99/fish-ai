@@ -23,8 +23,8 @@
 services:
   app:
     build: .
-    image: ai-goofish-monitor:lan
-    container_name: ai-goofish-monitor-app
+    image: fish-ai:lan
+    container_name: fish-ai-app
     # 刻意不写 init: true：镜像的 ENTRYPOINT 本身就是 tini，若再加 Docker 注入的
     # init，容器里会同时有两个 tini——Docker 的那个占 PID 1，镜像里的退到 PID 7，
     # 于是启动时打印 "Tini is not running as PID 1 ... zombie reaping won't work"。
