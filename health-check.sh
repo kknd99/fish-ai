@@ -58,6 +58,16 @@ if ! $DOCKER info >/dev/null 2>&1; then
 else
   ok "Docker 守护进程正常"
 
+  # 容器名自动识别：改名前后分别是 fish-ai-app / ai-goofish-monitor-app，
+  # 用户可能只更新了代码没重建容器，写死一个名字会误报"容器不存在"。
+  if ! $DOCKER inspect "$CONTAINER" >/dev/null 2>&1; then
+    detected="$($DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -iE 'fish-ai|goofish' | head -1)"
+    if [ -n "$detected" ]; then
+      info "指定的容器名 $CONTAINER 不存在，实际找到: $detected"
+      CONTAINER="$detected"
+    fi
+  fi
+
   state="$($DOCKER inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo 'missing')"
   case "$state" in
     running)
@@ -136,6 +146,20 @@ else
 
   env_report="$(python3 - <<'PY' 2>/dev/null || true
 import pathlib
+
+# 这些键的值一律不打印：它们本身就是凭据，或（如机器人 webhook 地址）内含 token。
+# 之前这里直接把值打了出来，把 App Secret 明文印到了终端上。
+SENSITIVE_MARKERS = ("SECRET", "TOKEN", "KEY", "PASSWORD", "BOT_URL")
+
+
+def mask(key, value):
+    if not value:
+        return "(未设置)"
+    if any(marker in key.upper() for marker in SENSITIVE_MARKERS):
+        return "已设置（%d 字符，已隐藏）" % len(value)
+    return value
+
+
 required = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL_NAME", "WEB_PASSWORD"]
 optional = ["FEISHU_BOT_URL", "FEISHU_APP_ID", "FEISHU_APP_SECRET",
             "ACCOUNT_ROTATION_ENABLED", "ACCOUNT_ROTATION_MODE",
@@ -151,7 +175,7 @@ for line in pathlib.Path(".env").read_text(encoding="utf-8").splitlines():
 for key in required:
     print("REQ|%s|%d" % (key, len(values.get(key, ""))))
 for key in optional:
-    print("OPT|%s|%s" % (key, values.get(key, "") or "(未设置)"))
+    print("OPT|%s|%s" % (key, mask(key, values.get(key, ""))))
 PY
 )"
 
@@ -189,7 +213,23 @@ else
     output="$(python3 - "$f" <<'PY' 2>/dev/null
 import json, sys, time
 path = sys.argv[1]
-data = json.load(open(path, encoding="utf-8"))
+try:
+    raw = open(path, encoding="utf-8").read()
+except FileNotFoundError:
+    print("  读取失败：文件不存在")
+    sys.exit(1)
+except PermissionError:
+    print("  读取失败：权限不足（文件可能属 root，请用 sudo 运行本脚本）")
+    sys.exit(1)
+except OSError as exc:
+    print("  读取失败：%s" % exc)
+    sys.exit(1)
+
+try:
+    data = json.loads(raw)
+except ValueError as exc:
+    print("  读取失败：内容不是合法 JSON（%s）" % exc)
+    sys.exit(1)
 cookies = data.get("cookies") or []
 now = time.time()
 expired = [c.get("name") for c in cookies
@@ -213,7 +253,7 @@ PY
     if [ "$rc" -eq 2 ]; then
       WARNINGS=$((WARNINGS + 1))
     elif [ "$rc" -ne 0 ]; then
-      warn "无法解析 $f（宿主机缺 python3？）"
+      warn "解析 $f 时出错（见上一行的原因）"
     fi
   done
 fi
