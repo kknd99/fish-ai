@@ -72,7 +72,7 @@ tar czf fish-ai-lan-deploy.tar.gz \
   --exclude='fish-ai/jsonl' \
   --exclude='fish-ai/state' \
   --exclude='fish-ai/price_history' \
-  -C /Users/mc/Documents ai-goofish-monitor
+  -C /Users/mc/Documents fish-ai
 
 scp fish-ai-lan-deploy.tar.gz target:/volume1/docker/
 

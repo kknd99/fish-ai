@@ -95,7 +95,7 @@ FEISHU_APP_SECRET=你的app_secret
 ### 验证
 
 ```bash
-sudo docker exec ai-goofish-monitor-app python -c '
+sudo docker exec fish-ai-app python -c '
 import sys, json
 sys.path.insert(0, "/app")
 from src.infrastructure.config.settings import NotificationSettings
