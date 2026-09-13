@@ -15,3 +15,14 @@ prompts/
 .serena/
 price_history/
 data/
+
+# --- 凭据与密钥：绝不入库 ---
+.env.*
+*.pem
+*.key
+ghp_*
+github_pat_*
+*.pub
+
+# --- 与本项目无关的第三方仓库（曾误放在项目目录里）---
+ComfyUI/
